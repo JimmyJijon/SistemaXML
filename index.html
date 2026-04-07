@@ -1,0 +1,514 @@
+<!doctype html>
+
+<html class="light" lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>Epicor tracePacket - XML Method Analysis</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&amp;display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      body {
+        font-family: "Inter", sans-serif;
+      }
+      .material-symbols-outlined {
+        font-variation-settings:
+          "FILL" 0,
+          "wght" 400,
+          "GRAD" 0,
+          "opsz" 24;
+      }
+      /* Custom scrollbar for enterprise feel */
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #c4c5d5;
+        border-radius: 10px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #757684;
+      }
+    </style>
+    <script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "inverse-on-surface": "#eff1f3",
+              primary: "#00288e",
+              "on-tertiary": "#ffffff",
+              "on-primary-fixed": "#001453",
+              "on-tertiary-fixed-variant": "#004e5a",
+              "tertiary-fixed": "#a2eeff",
+              "tertiary-fixed-dim": "#2fd9f4",
+              "secondary-container": "#2170e4",
+              "surface-container-low": "#f2f4f6",
+              "surface-container-lowest": "#ffffff",
+              "outline-variant": "#c4c5d5",
+              "inverse-surface": "#2d3133",
+              "on-primary": "#ffffff",
+              "on-secondary": "#ffffff",
+              "surface-tint": "#3755c3",
+              "on-tertiary-container": "#0ecde8",
+              "tertiary-container": "#00535f",
+              "inverse-primary": "#b8c4ff",
+              secondary: "#0058be",
+              "on-tertiary-fixed": "#001f25",
+              "on-surface-variant": "#444653",
+              "on-secondary-fixed": "#001a42",
+              "secondary-fixed-dim": "#adc6ff",
+              "on-secondary-fixed-variant": "#004395",
+              "surface-container": "#eceef0",
+              "on-surface": "#191c1e",
+              error: "#ba1a1a",
+              "secondary-fixed": "#d8e2ff",
+              "on-background": "#191c1e",
+              "primary-fixed": "#dde1ff",
+              "primary-container": "#1e40af",
+              "surface-container-high": "#e6e8ea",
+              "on-error": "#ffffff",
+              "surface-dim": "#d8dadc",
+              "error-container": "#ffdad6",
+              "surface-variant": "#e0e3e5",
+              surface: "#f7f9fb",
+              "on-secondary-container": "#fefcff",
+              "on-error-container": "#93000a",
+              "on-primary-fixed-variant": "#173bab",
+              tertiary: "#003a43",
+              "primary-fixed-dim": "#b8c4ff",
+              outline: "#757684",
+              "surface-container-highest": "#e0e3e5",
+              "on-primary-container": "#a8b8ff",
+              "surface-bright": "#f7f9fb",
+              background: "#f7f9fb",
+            },
+            borderRadius: {
+              DEFAULT: "0.25rem",
+              lg: "0.5rem",
+              xl: "0.75rem",
+              full: "9999px",
+            },
+          },
+        },
+      };
+    </script>
+  </head>
+  <body class="bg-surface text-on-surface min-h-screen flex flex-col">
+    <!-- Simple Header -->
+    <header
+      class="bg-gradient-to-r from-[#1e40af] to-[#0ecde8] text-white shadow-lg w-full flex justify-center items-center px-8 py-6"
+    >
+      <div class="max-w-7xl w-full flex flex-col items-start">
+        <h1 class="text-2xl font-bold text-white tracking-tight">
+          Comparador de Métodos XML
+        </h1>
+        <span class="text-sm font-normal opacity-90"
+          >Análisis de diferencias entre output e input - Epicor tracePacket
+          v1.2</span
+        >
+      </div>
+    </header>
+    <div class="flex-1">
+      <!-- Main Content (Centered Tool Interface) -->
+      <main class="max-w-7xl mx-auto p-8 space-y-6">
+        <!-- Top Row: Load and Select -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <!-- XML Loading Card -->
+          <section
+            class="lg:col-span-5 bg-surface-container-lowest rounded-lg shadow-sm p-6 border-l-4 border-primary h-full"
+          >
+            <div class="flex items-center gap-3 mb-6">
+              <span
+                class="material-symbols-outlined text-primary"
+                data-icon="upload_file"
+                >upload_file</span
+              >
+              <h2 class="text-lg font-semibold text-on-surface">
+                Carga de XML
+              </h2>
+            </div>
+            <div class="flex flex-col gap-4">
+              <input
+                accept=".xml,.trace,.packet,.txt"
+                class="hidden"
+                id="fileInput"
+                type="file"
+              />
+              <div
+                class="border-2 border-dashed border-outline-variant/30 rounded-lg p-8 flex flex-col items-center justify-center bg-surface-container-low/30 hover:bg-surface-container-low transition-colors cursor-pointer"
+                id="dropZone"
+              >
+                <span
+                  class="material-symbols-outlined text-4xl text-outline mb-2"
+                  data-icon="cloud_upload"
+                  >cloud_upload</span
+                >
+                <p class="text-sm font-medium text-on-surface-variant">
+                  Arrastre o seleccione su archivo
+                </p>
+                <p class="text-xs text-outline mt-1">
+                  Soporta .xml, .trace, .packet, .txt
+                </p>
+              </div>
+              <div
+                class="flex items-center justify-between p-3 bg-surface-container rounded-lg"
+              >
+                <div class="flex items-center gap-2 overflow-hidden">
+                  <span
+                    class="material-symbols-outlined text-sm text-secondary"
+                    data-icon="draft"
+                    >draft</span
+                  >
+                  <span
+                    id="fileName"
+                    class="text-sm font-medium truncate"
+                  ></span>
+                </div>
+                <button
+                  class="text-error hover:bg-error-container p-1 rounded"
+                  id="btnRemoveFile"
+                >
+                  <span
+                    class="material-symbols-outlined text-sm"
+                    data-icon="close"
+                    >close</span
+                  >
+                </button>
+              </div>
+              <button
+                class="w-full bg-[#1e40af] hover:bg-[#1e3a8a] text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+                id="btnCargarXml"
+              >
+                <span
+                  class="material-symbols-outlined text-sm"
+                  data-icon="publish"
+                  >publish</span
+                >
+                Cargar XML
+              </button>
+            </div>
+          </section>
+          <!-- Method Selection Card -->
+          <section
+            class="lg:col-span-7 bg-surface-container-lowest rounded-lg shadow-sm p-6 border-l-4 border-secondary h-full flex flex-col"
+          >
+            <div class="flex items-center gap-3 mb-6">
+              <span
+                class="material-symbols-outlined text-secondary"
+                data-icon="compare_arrows"
+                >compare_arrows</span
+              >
+              <h2 class="text-lg font-semibold text-on-surface">
+                Selección de Métodos
+              </h2>
+            </div>
+            <div class="flex-1 grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+              <div class="space-y-2">
+                <label
+                  class="text-[11px] font-bold uppercase tracking-wider text-outline block"
+                  >Método A (Output)</label
+                >
+                <div class="relative">
+                  <select
+                    class="w-full bg-surface-container-low border-0 ring-1 ring-outline-variant/30 rounded-lg py-3 px-4 appearance-none focus:ring-2 focus:ring-secondary focus:bg-white transition-all text-sm font-medium"
+                    id="metodoOutput"
+                  >
+                    <option>GetByID_Output</option>
+                    <option>Update_Output</option>
+                    <option>GetList_Output</option>
+                  </select>
+                  <span
+                    class="material-symbols-outlined absolute right-3 top-3 pointer-events-none text-outline"
+                    data-icon="expand_more"
+                    >expand_more</span
+                  >
+                </div>
+              </div>
+              <div class="space-y-2">
+                <label
+                  class="text-[11px] font-bold uppercase tracking-wider text-outline block"
+                  >Método B (Input)</label
+                >
+                <div class="relative">
+                  <select
+                    class="w-full bg-surface-container-low border-0 ring-1 ring-outline-variant/30 rounded-lg py-3 px-4 appearance-none focus:ring-2 focus:ring-secondary focus:bg-white transition-all text-sm font-medium"
+                    id="metodoInput"
+                  >
+                    <option>GetByID_Input</option>
+                    <option>Update_Input</option>
+                    <option>GetList_Input</option>
+                  </select>
+                  <span
+                    class="material-symbols-outlined absolute right-3 top-3 pointer-events-none text-outline"
+                    data-icon="expand_more"
+                    >expand_more</span
+                  >
+                </div>
+              </div>
+            </div>
+            <div class="flex justify-end gap-3 mt-auto">
+              <button
+                class="px-6 py-2 rounded-lg bg-surface-container-high text-on-surface font-semibold hover:bg-surface-container-highest transition-colors"
+              >
+                Limpiar
+              </button>
+              <button
+                class="px-8 py-2 rounded-lg bg-[#00288e] text-white font-bold flex items-center gap-2 hover:bg-[#001f70] transition-all shadow-md active:scale-95"
+                id="btnComparar"
+              >
+                <span class="material-symbols-outlined text-sm" data-icon="sync"
+                  >sync</span
+                >
+                Comparar
+              </button>
+            </div>
+          </section>
+        </div>
+        <!-- Results Section -->
+        <section
+          class="bg-surface-container-lowest rounded-lg shadow-sm overflow-hidden flex flex-col"
+        >
+          <!-- Action Section (Header / Filter Bar) -->
+          <div
+            class="px-6 py-4 flex flex-col md:flex-row justify-between items-center gap-4 bg-surface-container-low/50"
+          >
+            <div class="flex items-center gap-3">
+              <span
+                class="material-symbols-outlined text-on-surface-variant"
+                data-icon="analytics"
+                >analytics</span
+              >
+              <h2 class="text-lg font-semibold text-on-surface">Diferencias</h2>
+            </div>
+            <div
+              class="flex items-center gap-2 bg-surface-container-high p-1 rounded-lg"
+            >
+              <button
+                class="px-4 py-1.5 text-xs font-bold uppercase rounded-md bg-white text-primary shadow-sm"
+                data-filter="todos"
+                id="btnFiltroTodos"
+              >
+                Todos
+              </button>
+              <button
+                class="px-4 py-1.5 text-xs font-bold uppercase rounded-md text-on-surface-variant hover:bg-white/50 transition-colors"
+                data-filter="iguales"
+                id="btnFiltroIguales"
+              >
+                Iguales
+              </button>
+              <button
+                class="px-4 py-1.5 text-xs font-bold uppercase rounded-md text-on-surface-variant hover:bg-white/50 transition-colors"
+                data-filter="faltantes"
+                id="btnFiltroFaltantes"
+              >
+                Faltantes
+              </button>
+              <button
+                class="px-4 py-1.5 text-xs font-bold uppercase rounded-md text-on-surface-variant hover:bg-white/50 transition-colors"
+                data-filter="sobrantes"
+                id="btnFiltroSobrantes"
+              >
+                Sobrantes
+              </button>
+            </div>
+            <button
+              class="px-4 py-2 bg-[#d8e2ff] text-[#001a42] rounded-lg text-xs font-bold uppercase flex items-center gap-2 hover:bg-[#adc6ff] transition-colors"
+              id="btnExportarExcel"
+            >
+              <span
+                class="material-symbols-outlined text-sm"
+                data-icon="download"
+                >download</span
+              >
+              Exportar a Excel
+            </button>
+          </div>
+          <!-- Table Container -->
+          <div class="overflow-x-auto">
+            <table
+              class="w-full text-left border-collapse"
+              id="tablaResultados"
+            >
+              <thead>
+                <tr
+                  class="bg-surface-container text-[11px] font-bold uppercase tracking-wider text-outline border-b border-outline-variant/20"
+                >
+                  <th class="px-6 py-4">Parámetro</th>
+                  <th class="px-6 py-4">Tipo</th>
+                  <th class="px-6 py-4">Valor Output</th>
+                  <th class="px-6 py-4">Valor Input</th>
+                  <th class="px-6 py-4 text-center">Estado</th>
+                </tr>
+              </thead>
+              <tbody id="tbodyResultados" class="divide-y-4 divide-surface">
+                <!-- Status: IGUAL -->
+                <tr
+                  class="bg-surface-container-lowest hover:bg-surface-container-low/50 transition-colors group"
+                >
+                  <td
+                    class="px-6 py-4 font-medium text-sm flex items-center gap-3"
+                  >
+                    <div class="w-1 h-6 bg-[#22c55e] rounded-full"></div>
+                    CompanyID
+                  </td>
+                  <td class="px-6 py-4 text-xs font-mono text-outline">
+                    System.String
+                  </td>
+                  <td class="px-6 py-4 text-sm font-medium">EPIC01</td>
+                  <td class="px-6 py-4 text-sm font-medium">EPIC01</td>
+                  <td class="px-6 py-4">
+                    <div class="flex justify-center">
+                      <span
+                        class="bg-[#dcfce7] text-[#166534] text-[10px] font-black uppercase px-3 py-1 rounded-full border border-[#22c55e]/20 tracking-widest"
+                        >IGUAL</span
+                      >
+                    </div>
+                  </td>
+                </tr>
+                <!-- Status: FALTANTE -->
+                <tr
+                  class="bg-[#fee2e2]/30 hover:bg-[#fee2e2]/50 transition-colors group"
+                >
+                  <td
+                    class="px-6 py-4 font-medium text-sm flex items-center gap-3"
+                  >
+                    <div class="w-1 h-6 bg-error rounded-full"></div>
+                    CustNum
+                  </td>
+                  <td class="px-6 py-4 text-xs font-mono text-outline">
+                    System.Int32
+                  </td>
+                  <td class="px-6 py-4 text-sm font-medium text-error">4029</td>
+                  <td
+                    class="px-6 py-4 text-sm font-medium italic text-outline/50"
+                  >
+                    null
+                  </td>
+                  <td class="px-6 py-4">
+                    <div class="flex justify-center">
+                      <span
+                        class="bg-[#fee2e2] text-error text-[10px] font-black uppercase px-3 py-1 rounded-full border border-error/20 tracking-widest"
+                        >FALTANTE</span
+                      >
+                    </div>
+                  </td>
+                </tr>
+                <!-- Status: SOBRANTE -->
+                <tr
+                  class="bg-[#fef3c7]/30 hover:bg-[#fef3c7]/50 transition-colors group"
+                >
+                  <td
+                    class="px-6 py-4 font-medium text-sm flex items-center gap-3"
+                  >
+                    <div class="w-1 h-6 bg-amber-500 rounded-full"></div>
+                    SysRowID
+                  </td>
+                  <td class="px-6 py-4 text-xs font-mono text-outline">
+                    System.Guid
+                  </td>
+                  <td
+                    class="px-6 py-4 text-sm font-medium italic text-outline/50"
+                  >
+                    undefined
+                  </td>
+                  <td class="px-6 py-4 text-sm font-medium text-amber-800">
+                    5a9c3-4d...
+                  </td>
+                  <td class="px-6 py-4">
+                    <div class="flex justify-center">
+                      <span
+                        class="bg-[#fef3c7] text-[#92400e] text-[10px] font-black uppercase px-3 py-1 rounded-full border border-amber-500/20 tracking-widest"
+                        >SOBRANTE</span
+                      >
+                    </div>
+                  </td>
+                </tr>
+                <!-- Status: IGUAL -->
+                <tr
+                  class="bg-surface-container-lowest hover:bg-surface-container-low/50 transition-colors group"
+                >
+                  <td
+                    class="px-6 py-4 font-medium text-sm flex items-center gap-3"
+                  >
+                    <div class="w-1 h-6 bg-[#22c55e] rounded-full"></div>
+                    PartNum
+                  </td>
+                  <td class="px-6 py-4 text-xs font-mono text-outline">
+                    System.String
+                  </td>
+                  <td class="px-6 py-4 text-sm font-medium">BOND-007</td>
+                  <td class="px-6 py-4 text-sm font-medium">BOND-007</td>
+                  <td class="px-6 py-4">
+                    <div class="flex justify-center">
+                      <span
+                        class="bg-[#dcfce7] text-[#166534] text-[10px] font-black uppercase px-3 py-1 rounded-full border border-[#22c55e]/20 tracking-widest"
+                        >IGUAL</span
+                      >
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <!-- Table Footer / Pagination -->
+          <div
+            class="px-6 py-4 flex justify-between items-center bg-surface-container-low border-t border-outline-variant/10"
+          >
+            <span class="text-xs text-outline font-medium"
+              >Mostrando 4 de 156 parámetros encontrados</span
+            >
+            <div class="flex gap-1">
+              <button
+                class="p-1 rounded hover:bg-surface-container-high transition-colors text-outline"
+              >
+                <span class="material-symbols-outlined" data-icon="chevron_left"
+                  >chevron_left</span
+                >
+              </button>
+              <button
+                class="px-3 py-1 rounded bg-primary text-white text-xs font-bold"
+              >
+                1
+              </button>
+              <button
+                class="px-3 py-1 rounded hover:bg-surface-container-high text-xs font-bold"
+              >
+                2
+              </button>
+              <button
+                class="px-3 py-1 rounded hover:bg-surface-container-high text-xs font-bold"
+              >
+                3
+              </button>
+              <button
+                class="p-1 rounded hover:bg-surface-container-high transition-colors text-outline"
+              >
+                <span
+                  class="material-symbols-outlined"
+                  data-icon="chevron_right"
+                  >chevron_right</span
+                >
+              </button>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="tracepacket-comparator.js"></script>
+  </body>
+</html>
