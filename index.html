@@ -1,514 +1,463 @@
 <!doctype html>
-
 <html class="light" lang="es">
-  <head>
-    <meta charset="utf-8" />
-    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
-    <title>Epicor tracePacket - XML Method Analysis</title>
-    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&amp;display=swap"
-      rel="stylesheet"
-    />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap"
-      rel="stylesheet"
-    />
-    <style>
-      body {
-        font-family: "Inter", sans-serif;
-      }
-      .material-symbols-outlined {
-        font-variation-settings:
-          "FILL" 0,
-          "wght" 400,
-          "GRAD" 0,
-          "opsz" 24;
-      }
-      /* Custom scrollbar for enterprise feel */
-      ::-webkit-scrollbar {
-        width: 6px;
-        height: 6px;
-      }
-      ::-webkit-scrollbar-track {
-        background: transparent;
-      }
-      ::-webkit-scrollbar-thumb {
-        background: #c4c5d5;
-        border-radius: 10px;
-      }
-      ::-webkit-scrollbar-thumb:hover {
-        background: #757684;
-      }
-    </style>
-    <script id="tailwind-config">
-      tailwind.config = {
-        darkMode: "class",
-        theme: {
-          extend: {
-            colors: {
-              "inverse-on-surface": "#eff1f3",
-              primary: "#00288e",
-              "on-tertiary": "#ffffff",
-              "on-primary-fixed": "#001453",
-              "on-tertiary-fixed-variant": "#004e5a",
-              "tertiary-fixed": "#a2eeff",
-              "tertiary-fixed-dim": "#2fd9f4",
-              "secondary-container": "#2170e4",
-              "surface-container-low": "#f2f4f6",
-              "surface-container-lowest": "#ffffff",
-              "outline-variant": "#c4c5d5",
-              "inverse-surface": "#2d3133",
-              "on-primary": "#ffffff",
-              "on-secondary": "#ffffff",
-              "surface-tint": "#3755c3",
-              "on-tertiary-container": "#0ecde8",
-              "tertiary-container": "#00535f",
-              "inverse-primary": "#b8c4ff",
-              secondary: "#0058be",
-              "on-tertiary-fixed": "#001f25",
-              "on-surface-variant": "#444653",
-              "on-secondary-fixed": "#001a42",
-              "secondary-fixed-dim": "#adc6ff",
-              "on-secondary-fixed-variant": "#004395",
-              "surface-container": "#eceef0",
-              "on-surface": "#191c1e",
-              error: "#ba1a1a",
-              "secondary-fixed": "#d8e2ff",
-              "on-background": "#191c1e",
-              "primary-fixed": "#dde1ff",
-              "primary-container": "#1e40af",
-              "surface-container-high": "#e6e8ea",
-              "on-error": "#ffffff",
-              "surface-dim": "#d8dadc",
-              "error-container": "#ffdad6",
-              "surface-variant": "#e0e3e5",
-              surface: "#f7f9fb",
-              "on-secondary-container": "#fefcff",
-              "on-error-container": "#93000a",
-              "on-primary-fixed-variant": "#173bab",
-              tertiary: "#003a43",
-              "primary-fixed-dim": "#b8c4ff",
-              outline: "#757684",
-              "surface-container-highest": "#e0e3e5",
-              "on-primary-container": "#a8b8ff",
-              "surface-bright": "#f7f9fb",
-              background: "#f7f9fb",
-            },
-            borderRadius: {
-              DEFAULT: "0.25rem",
-              lg: "0.5rem",
-              xl: "0.75rem",
-              full: "9999px",
-            },
+
+<head>
+  <meta charset="utf-8" />
+  <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+  <title>Epicor tracePacket - Technical XML Debugger</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
+    rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
+    rel="stylesheet" />
+  <style>
+    body {
+      font-family: "Inter", sans-serif;
+    }
+
+    .material-symbols-outlined {
+      font-variation-settings:
+        "FILL" 0,
+        "wght" 400,
+        "GRAD" 0,
+        "opsz" 20;
+    }
+
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #c4c5d5;
+      border-radius: 10px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #757684;
+    }
+
+    /* ── Árbol: línea guía vertical ── */
+    .tree-connector {
+      position: relative;
+    }
+
+    .tree-connector::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 1px;
+      background: #cbd5e1;
+    }
+
+    /* ── Clases semánticas de estado (req 12) ── */
+    /* Se aplican a <tr data-estado="..."> */
+    .data-igual {
+      opacity: 0.65;
+    }
+
+    .data-diferente {
+      background-color: #fff1f2;
+    }
+
+    .data-diferente td {
+      color: #dc2626;
+      font-weight: 600;
+    }
+
+    .data-solo-a {
+      background-color: #fef3c7;
+    }
+
+    .data-solo-a td {
+      color: #b45309;
+    }
+
+    .data-solo-b {
+      background-color: #ecfeff;
+    }
+
+    .data-solo-b td {
+      color: #0891b2;
+    }
+
+    /* ── Nodos colapsados ── */
+    [data-expanded="false"]>.tree-children {
+      display: none;
+    }
+
+    /* ── Cursor para nodos expandibles ── */
+    [data-expandable="true"] {
+      cursor: pointer;
+    }
+
+    [data-expandable="true"]:hover td:first-child {
+      text-decoration: underline;
+    }
+  </style>
+  <script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            primary: "#1e40af",
+            secondary: "#0ecde8",
+            surface: "#f7f9fb",
+            "surface-container": "#eceef0",
+            "surface-container-low": "#f2f4f6",
+            "surface-container-lowest": "#ffffff",
+            "outline-variant": "#c4c5d5",
+            "on-surface": "#191c1e",
+            "on-surface-variant": "#444653",
+            error: "#ba1a1a",
+          },
+          borderRadius: {
+            DEFAULT: "8px",
+            lg: "12px",
+            xl: "16px",
+            full: "9999px",
           },
         },
-      };
-    </script>
-  </head>
-  <body class="bg-surface text-on-surface min-h-screen flex flex-col">
-    <!-- Simple Header -->
-    <header
-      class="bg-gradient-to-r from-[#1e40af] to-[#0ecde8] text-white shadow-lg w-full flex justify-center items-center px-8 py-6"
-    >
-      <div class="max-w-7xl w-full flex flex-col items-start">
-        <h1 class="text-2xl font-bold text-white tracking-tight">
-          Comparador de Métodos XML
-        </h1>
-        <span class="text-sm font-normal opacity-90"
-          >Análisis de diferencias entre output e input - Epicor tracePacket
-          v1.2</span
-        >
-      </div>
-    </header>
-    <div class="flex-1">
-      <!-- Main Content (Centered Tool Interface) -->
-      <main class="max-w-7xl mx-auto p-8 space-y-6">
-        <!-- Top Row: Load and Select -->
-        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <!-- XML Loading Card -->
-          <section
-            class="lg:col-span-5 bg-surface-container-lowest rounded-lg shadow-sm p-6 border-l-4 border-primary h-full"
-          >
-            <div class="flex items-center gap-3 mb-6">
-              <span
-                class="material-symbols-outlined text-primary"
-                data-icon="upload_file"
-                >upload_file</span
-              >
-              <h2 class="text-lg font-semibold text-on-surface">
-                Carga de XML
-              </h2>
+      },
+    };
+  </script>
+</head>
+
+<body class="bg-surface text-on-surface min-h-screen flex flex-col">
+  <!-- ══════════════════════════════════════════════════════════════
+         HEADER
+    ══════════════════════════════════════════════════════════════ -->
+  <header
+    class="bg-gradient-to-r from-[#1e40af] to-[#0ecde8] text-white shadow-lg w-full flex justify-center items-center px-8 py-4">
+    <div class="max-w-7xl w-full flex flex-col items-start">
+      <h1 class="text-xl font-extrabold text-white tracking-tight flex items-center gap-2">
+        <span class="material-symbols-outlined">terminal</span>
+        XML Trace Debugger
+      </h1>
+      <span class="text-xs font-normal opacity-90">Análisis técnico de trazas Epicor tracePacket v1.2</span>
+    </div>
+  </header>
+
+  <div class="flex-1 overflow-auto">
+    <main class="max-w-7xl mx-auto p-6 space-y-6">
+      <!-- ══════════════════════════════════════════════════════════
+             TOP ROW: CARGA + CONFIGURACIÓN
+        ══════════════════════════════════════════════════════════ -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <!-- ── Carga de Trazas ── -->
+        <section class="lg:col-span-4 bg-surface-container-lowest rounded-lg shadow-sm p-5 border-l-4 border-primary">
+          <div class="flex items-center gap-2 mb-4 text-primary">
+            <span class="material-symbols-outlined">upload_file</span>
+            <h2 class="text-sm font-bold uppercase tracking-wider">
+              Carga de Trazas
+            </h2>
+          </div>
+          <div class="space-y-3">
+            <!-- Zona de drop -->
+            <div id="dropZone"
+              class="border-2 border-dashed border-outline-variant/40 rounded-lg p-6 flex flex-col items-center justify-center bg-surface-container-low/30 hover:bg-surface-container-low transition-colors cursor-pointer">
+              <span class="material-symbols-outlined text-3xl text-outline mb-1">cloud_upload</span>
+              <p class="text-xs font-medium text-on-surface-variant">
+                Trace XML file
+              </p>
+              <!-- Input oculto; el dropZone hace clic sobre él -->
+              <input id="fileInput" type="file" accept=".xml,.trace,.txt,.packet" class="hidden" />
             </div>
-            <div class="flex flex-col gap-4">
-              <input
-                accept=".xml,.trace,.packet,.txt"
-                class="hidden"
-                id="fileInput"
-                type="file"
-              />
-              <div
-                class="border-2 border-dashed border-outline-variant/30 rounded-lg p-8 flex flex-col items-center justify-center bg-surface-container-low/30 hover:bg-surface-container-low transition-colors cursor-pointer"
-                id="dropZone"
-              >
-                <span
-                  class="material-symbols-outlined text-4xl text-outline mb-2"
-                  data-icon="cloud_upload"
-                  >cloud_upload</span
-                >
-                <p class="text-sm font-medium text-on-surface-variant">
-                  Arrastre o seleccione su archivo
-                </p>
-                <p class="text-xs text-outline mt-1">
-                  Soporta .xml, .trace, .packet, .txt
-                </p>
+
+            <!-- Archivo seleccionado -->
+            <div id="fileInfoBar"
+              class="flex items-center justify-between p-2 bg-surface-container rounded border border-outline-variant/20">
+              <div class="flex items-center gap-2 overflow-hidden">
+                <span class="material-symbols-outlined text-xs text-secondary">draft</span>
+                <span id="fileName" class="text-xs font-medium truncate text-on-surface-variant">Sin archivo</span>
               </div>
-              <div
-                class="flex items-center justify-between p-3 bg-surface-container rounded-lg"
-              >
-                <div class="flex items-center gap-2 overflow-hidden">
-                  <span
-                    class="material-symbols-outlined text-sm text-secondary"
-                    data-icon="draft"
-                    >draft</span
-                  >
-                  <span
-                    id="fileName"
-                    class="text-sm font-medium truncate"
-                  ></span>
-                </div>
-                <button
-                  class="text-error hover:bg-error-container p-1 rounded"
-                  id="btnRemoveFile"
-                >
-                  <span
-                    class="material-symbols-outlined text-sm"
-                    data-icon="close"
-                    >close</span
-                  >
-                </button>
-              </div>
-              <button
-                class="w-full bg-[#1e40af] hover:bg-[#1e3a8a] text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
-                id="btnCargarXml"
-              >
-                <span
-                  class="material-symbols-outlined text-sm"
-                  data-icon="publish"
-                  >publish</span
-                >
-                Cargar XML
+              <button id="btnRemoveFile" class="text-error hover:bg-red-50 p-1 rounded" title="Quitar archivo">
+                <span class="material-symbols-outlined text-xs">close</span>
               </button>
             </div>
-          </section>
-          <!-- Method Selection Card -->
-          <section
-            class="lg:col-span-7 bg-surface-container-lowest rounded-lg shadow-sm p-6 border-l-4 border-secondary h-full flex flex-col"
-          >
-            <div class="flex items-center gap-3 mb-6">
-              <span
-                class="material-symbols-outlined text-secondary"
-                data-icon="compare_arrows"
-                >compare_arrows</span
-              >
-              <h2 class="text-lg font-semibold text-on-surface">
-                Selección de Métodos
-              </h2>
-            </div>
-            <div class="flex-1 grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-              <div class="space-y-2">
-                <label
-                  class="text-[11px] font-bold uppercase tracking-wider text-outline block"
-                  >Método A (Output)</label
-                >
-                <div class="relative">
-                  <select
-                    class="w-full bg-surface-container-low border-0 ring-1 ring-outline-variant/30 rounded-lg py-3 px-4 appearance-none focus:ring-2 focus:ring-secondary focus:bg-white transition-all text-sm font-medium"
-                    id="metodoOutput"
-                  >
-                    <option>GetByID_Output</option>
-                    <option>Update_Output</option>
-                    <option>GetList_Output</option>
-                  </select>
-                  <span
-                    class="material-symbols-outlined absolute right-3 top-3 pointer-events-none text-outline"
-                    data-icon="expand_more"
-                    >expand_more</span
-                  >
-                </div>
-              </div>
-              <div class="space-y-2">
-                <label
-                  class="text-[11px] font-bold uppercase tracking-wider text-outline block"
-                  >Método B (Input)</label
-                >
-                <div class="relative">
-                  <select
-                    class="w-full bg-surface-container-low border-0 ring-1 ring-outline-variant/30 rounded-lg py-3 px-4 appearance-none focus:ring-2 focus:ring-secondary focus:bg-white transition-all text-sm font-medium"
-                    id="metodoInput"
-                  >
-                    <option>GetByID_Input</option>
-                    <option>Update_Input</option>
-                    <option>GetList_Input</option>
-                  </select>
-                  <span
-                    class="material-symbols-outlined absolute right-3 top-3 pointer-events-none text-outline"
-                    data-icon="expand_more"
-                    >expand_more</span
-                  >
-                </div>
-              </div>
-            </div>
-            <div class="flex justify-end gap-3 mt-auto">
-              <button
-                class="px-6 py-2 rounded-lg bg-surface-container-high text-on-surface font-semibold hover:bg-surface-container-highest transition-colors"
-              >
-                Limpiar
-              </button>
-              <button
-                class="px-8 py-2 rounded-lg bg-[#00288e] text-white font-bold flex items-center gap-2 hover:bg-[#001f70] transition-all shadow-md active:scale-95"
-                id="btnComparar"
-              >
-                <span class="material-symbols-outlined text-sm" data-icon="sync"
-                  >sync</span
-                >
-                Comparar
-              </button>
-            </div>
-          </section>
-        </div>
-        <!-- Results Section -->
-        <section
-          class="bg-surface-container-lowest rounded-lg shadow-sm overflow-hidden flex flex-col"
-        >
-          <!-- Action Section (Header / Filter Bar) -->
-          <div
-            class="px-6 py-4 flex flex-col md:flex-row justify-between items-center gap-4 bg-surface-container-low/50"
-          >
-            <div class="flex items-center gap-3">
-              <span
-                class="material-symbols-outlined text-on-surface-variant"
-                data-icon="analytics"
-                >analytics</span
-              >
-              <h2 class="text-lg font-semibold text-on-surface">Diferencias</h2>
-            </div>
-            <div
-              class="flex items-center gap-2 bg-surface-container-high p-1 rounded-lg"
-            >
-              <button
-                class="px-4 py-1.5 text-xs font-bold uppercase rounded-md bg-white text-primary shadow-sm"
-                data-filter="todos"
-                id="btnFiltroTodos"
-              >
-                Todos
-              </button>
-              <button
-                class="px-4 py-1.5 text-xs font-bold uppercase rounded-md text-on-surface-variant hover:bg-white/50 transition-colors"
-                data-filter="iguales"
-                id="btnFiltroIguales"
-              >
-                Iguales
-              </button>
-              <button
-                class="px-4 py-1.5 text-xs font-bold uppercase rounded-md text-on-surface-variant hover:bg-white/50 transition-colors"
-                data-filter="faltantes"
-                id="btnFiltroFaltantes"
-              >
-                Faltantes
-              </button>
-              <button
-                class="px-4 py-1.5 text-xs font-bold uppercase rounded-md text-on-surface-variant hover:bg-white/50 transition-colors"
-                data-filter="sobrantes"
-                id="btnFiltroSobrantes"
-              >
-                Sobrantes
-              </button>
-            </div>
-            <button
-              class="px-4 py-2 bg-[#d8e2ff] text-[#001a42] rounded-lg text-xs font-bold uppercase flex items-center gap-2 hover:bg-[#adc6ff] transition-colors"
-              id="btnExportarExcel"
-            >
-              <span
-                class="material-symbols-outlined text-sm"
-                data-icon="download"
-                >download</span
-              >
-              Exportar a Excel
+
+            <button id="btnCargarXml"
+              class="w-full bg-primary hover:bg-[#1e3a8a] text-white text-xs font-bold py-2 rounded transition-all active:scale-[0.98]">
+              CARGAR DATA
             </button>
           </div>
-          <!-- Table Container -->
-          <div class="overflow-x-auto">
-            <table
-              class="w-full text-left border-collapse"
-              id="tablaResultados"
-            >
-              <thead>
-                <tr
-                  class="bg-surface-container text-[11px] font-bold uppercase tracking-wider text-outline border-b border-outline-variant/20"
-                >
-                  <th class="px-6 py-4">Parámetro</th>
-                  <th class="px-6 py-4">Tipo</th>
-                  <th class="px-6 py-4">Valor Output</th>
-                  <th class="px-6 py-4">Valor Input</th>
-                  <th class="px-6 py-4 text-center">Estado</th>
-                </tr>
-              </thead>
-              <tbody id="tbodyResultados" class="divide-y-4 divide-surface">
-                <!-- Status: IGUAL -->
-                <tr
-                  class="bg-surface-container-lowest hover:bg-surface-container-low/50 transition-colors group"
-                >
-                  <td
-                    class="px-6 py-4 font-medium text-sm flex items-center gap-3"
-                  >
-                    <div class="w-1 h-6 bg-[#22c55e] rounded-full"></div>
-                    CompanyID
-                  </td>
-                  <td class="px-6 py-4 text-xs font-mono text-outline">
-                    System.String
-                  </td>
-                  <td class="px-6 py-4 text-sm font-medium">EPIC01</td>
-                  <td class="px-6 py-4 text-sm font-medium">EPIC01</td>
-                  <td class="px-6 py-4">
-                    <div class="flex justify-center">
-                      <span
-                        class="bg-[#dcfce7] text-[#166534] text-[10px] font-black uppercase px-3 py-1 rounded-full border border-[#22c55e]/20 tracking-widest"
-                        >IGUAL</span
-                      >
-                    </div>
-                  </td>
-                </tr>
-                <!-- Status: FALTANTE -->
-                <tr
-                  class="bg-[#fee2e2]/30 hover:bg-[#fee2e2]/50 transition-colors group"
-                >
-                  <td
-                    class="px-6 py-4 font-medium text-sm flex items-center gap-3"
-                  >
-                    <div class="w-1 h-6 bg-error rounded-full"></div>
-                    CustNum
-                  </td>
-                  <td class="px-6 py-4 text-xs font-mono text-outline">
-                    System.Int32
-                  </td>
-                  <td class="px-6 py-4 text-sm font-medium text-error">4029</td>
-                  <td
-                    class="px-6 py-4 text-sm font-medium italic text-outline/50"
-                  >
-                    null
-                  </td>
-                  <td class="px-6 py-4">
-                    <div class="flex justify-center">
-                      <span
-                        class="bg-[#fee2e2] text-error text-[10px] font-black uppercase px-3 py-1 rounded-full border border-error/20 tracking-widest"
-                        >FALTANTE</span
-                      >
-                    </div>
-                  </td>
-                </tr>
-                <!-- Status: SOBRANTE -->
-                <tr
-                  class="bg-[#fef3c7]/30 hover:bg-[#fef3c7]/50 transition-colors group"
-                >
-                  <td
-                    class="px-6 py-4 font-medium text-sm flex items-center gap-3"
-                  >
-                    <div class="w-1 h-6 bg-amber-500 rounded-full"></div>
-                    SysRowID
-                  </td>
-                  <td class="px-6 py-4 text-xs font-mono text-outline">
-                    System.Guid
-                  </td>
-                  <td
-                    class="px-6 py-4 text-sm font-medium italic text-outline/50"
-                  >
-                    undefined
-                  </td>
-                  <td class="px-6 py-4 text-sm font-medium text-amber-800">
-                    5a9c3-4d...
-                  </td>
-                  <td class="px-6 py-4">
-                    <div class="flex justify-center">
-                      <span
-                        class="bg-[#fef3c7] text-[#92400e] text-[10px] font-black uppercase px-3 py-1 rounded-full border border-amber-500/20 tracking-widest"
-                        >SOBRANTE</span
-                      >
-                    </div>
-                  </td>
-                </tr>
-                <!-- Status: IGUAL -->
-                <tr
-                  class="bg-surface-container-lowest hover:bg-surface-container-low/50 transition-colors group"
-                >
-                  <td
-                    class="px-6 py-4 font-medium text-sm flex items-center gap-3"
-                  >
-                    <div class="w-1 h-6 bg-[#22c55e] rounded-full"></div>
-                    PartNum
-                  </td>
-                  <td class="px-6 py-4 text-xs font-mono text-outline">
-                    System.String
-                  </td>
-                  <td class="px-6 py-4 text-sm font-medium">BOND-007</td>
-                  <td class="px-6 py-4 text-sm font-medium">BOND-007</td>
-                  <td class="px-6 py-4">
-                    <div class="flex justify-center">
-                      <span
-                        class="bg-[#dcfce7] text-[#166534] text-[10px] font-black uppercase px-3 py-1 rounded-full border border-[#22c55e]/20 tracking-widest"
-                        >IGUAL</span
-                      >
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+        </section>
+
+        <!-- ── Configuración de Comparación ── -->
+        <section class="lg:col-span-8 bg-surface-container-lowest rounded-lg shadow-sm p-5 border-l-4 border-secondary">
+          <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-2 text-secondary">
+              <span class="material-symbols-outlined">settings_ethernet</span>
+              <h2 class="text-sm font-bold uppercase tracking-wider">
+                Configuración de Comparación
+              </h2>
+            </div>
           </div>
-          <!-- Table Footer / Pagination -->
-          <div
-            class="px-6 py-4 flex justify-between items-center bg-surface-container-low border-t border-outline-variant/10"
-          >
-            <span class="text-xs text-outline font-medium"
-              >Mostrando 4 de 156 parámetros encontrados</span
-            >
-            <div class="flex gap-1">
-              <button
-                class="p-1 rounded hover:bg-surface-container-high transition-colors text-outline"
-              >
-                <span class="material-symbols-outlined" data-icon="chevron_left"
-                  >chevron_left</span
-                >
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+            <!-- REQ 1: Business Object A → #selectBusinessObjectA -->
+            <div class="space-y-1">
+              <label for="selectBusinessObjectA" class="text-[10px] font-black text-outline uppercase">
+                Fuente A (BusinessObject)
+              </label>
+              <select id="selectBusinessObjectA"
+                class="w-full bg-surface-container-low border-0 ring-1 ring-outline-variant/30 rounded py-2 px-3 text-xs font-medium focus:ring-2 focus:ring-primary">
+                <option value="">— Cargue un archivo —</option>
+              </select>
+            </div>
+
+            <!-- REQ 1: Business Object B → #selectBusinessObjectB -->
+            <div class="space-y-1">
+              <label for="selectBusinessObjectB" class="text-[10px] font-black text-outline uppercase">
+                Fuente B (BusinessObject)
+              </label>
+              <select id="selectBusinessObjectB"
+                class="w-full bg-surface-container-low border-0 ring-1 ring-outline-variant/30 rounded py-2 px-3 text-xs font-medium focus:ring-2 focus:ring-primary">
+                <option value="">— Cargue un archivo —</option>
+              </select>
+            </div>
+
+            <!-- REQ 2: Método A → #selectMetodoA  (numeración global) -->
+            <div class="space-y-1">
+              <label for="selectMetodoA" class="text-[10px] font-black text-outline uppercase">
+                Método A (Timeline)
+              </label>
+              <select id="selectMetodoA"
+                class="w-full bg-surface-container-low border-0 ring-1 ring-outline-variant/30 rounded py-2 px-3 text-xs font-medium focus:ring-2 focus:ring-primary">
+                <option value="">— Seleccione Fuente A —</option>
+              </select>
+            </div>
+
+            <!-- REQ 2: Método B → #selectMetodoB -->
+            <div class="space-y-1">
+              <label for="selectMetodoB" class="text-[10px] font-black text-outline uppercase">
+                Método B (Timeline)
+              </label>
+              <select id="selectMetodoB"
+                class="w-full bg-surface-container-low border-0 ring-1 ring-outline-variant/30 rounded py-2 px-3 text-xs font-medium focus:ring-2 focus:ring-primary">
+                <option value="">— Seleccione Fuente B —</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- REQ 3 + REQ 4: Tipo de análisis y Alcance -->
+          <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-outline-variant/20">
+            <!-- REQ 3: #tipoComparacion -->
+            <div class="space-y-2">
+              <label for="tipoComparacion" class="text-[10px] font-black text-outline uppercase block mb-2">
+                Tipo de Análisis
+              </label>
+              <select id="tipoComparacion"
+                class="w-full bg-surface-container-low border-0 ring-1 ring-outline-variant/30 rounded py-2 px-3 text-xs font-medium focus:ring-2 focus:ring-primary">
+                <option value="input-vs-output">Input A vs Output A</option>
+                <option value="output-vs-input">Output A vs Input B</option>
+              </select>
+            </div>
+
+            <!-- REQ 4: #tipoDatoComparado -->
+            <div class="space-y-2">
+              <label for="tipoDatoComparado" class="text-[10px] font-black text-outline uppercase block mb-2">
+                Alcance (Scope)
+              </label>
+              <select id="tipoDatoComparado"
+                class="w-full bg-surface-container-low border-0 ring-1 ring-outline-variant/30 rounded py-2 px-3 text-xs font-medium focus:ring-2 focus:ring-primary">
+                <option value="parametros">Parámetros</option>
+                <option value="datasets">DataSets</option>
+                <option value="ambos">Ambos</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Acciones -->
+          <div class="mt-5 flex justify-between items-center">
+            <!-- REQ 5: #btnAgregarComparacion — acumula, NO reemplaza -->
+            <button id="btnAgregarComparacion"
+              class="text-primary text-xs font-bold border border-primary px-4 py-2 rounded hover:bg-primary/5 flex items-center gap-2">
+              <span class="material-symbols-outlined text-sm">add_box</span>
+              AGREGAR COMPARACIÓN
+            </button>
+
+            <div class="flex gap-3">
+              <button id="btnLimpiar"
+                class="px-6 py-2 rounded text-xs font-bold uppercase text-on-surface-variant hover:bg-surface-container">
+                Limpiar
               </button>
-              <button
-                class="px-3 py-1 rounded bg-primary text-white text-xs font-bold"
-              >
-                1
-              </button>
-              <button
-                class="px-3 py-1 rounded hover:bg-surface-container-high text-xs font-bold"
-              >
-                2
-              </button>
-              <button
-                class="px-3 py-1 rounded hover:bg-surface-container-high text-xs font-bold"
-              >
-                3
-              </button>
-              <button
-                class="p-1 rounded hover:bg-surface-container-high transition-colors text-outline"
-              >
-                <span
-                  class="material-symbols-outlined"
-                  data-icon="chevron_right"
-                  >chevron_right</span
-                >
+              <button id="btnComparar"
+                class="px-8 py-2 rounded bg-primary text-white text-xs font-bold uppercase shadow-md hover:bg-primary/90 flex items-center gap-2">
+                <span class="material-symbols-outlined text-sm">sync</span>
+                Ejecutar Análisis
               </button>
             </div>
           </div>
         </section>
-      </main>
-    </div>
-    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-    <script src="tracepacket-comparator.js"></script>
-  </body>
+      </div>
+
+      <!-- ══════════════════════════════════════════════════════════
+             REQ 6 + 13: Contenedor de comparaciones acumuladas
+             Cada bloque tiene .comparacion-block y data-comparacion-id
+        ══════════════════════════════════════════════════════════ -->
+      <div id="comparisonsContainer" class="space-y-6">
+        <div id="emptyState"
+          class="flex flex-col items-center justify-center py-20 bg-surface-container-low/20 rounded-xl border-2 border-dashed border-outline-variant/30 text-outline">
+          <span class="material-symbols-outlined text-5xl mb-4 opacity-20">compare_arrows</span>
+          <p class="text-sm font-medium">No hay comparaciones activas</p>
+          <p class="text-[11px] opacity-60">Seleccione los métodos arriba y haga clic en "Agregar Comparación"</p>
+        </div>
+      </div>
+
+      <!-- /comparisonsContainer -->
+
+      <!-- Exportar todo (#btnExportarExcel global) -->
+      <div class="flex justify-end">
+        <button id="btnExportarExcel"
+          class="flex items-center gap-2 px-6 py-2 bg-[#d8e2ff] text-[#001a42] rounded-lg text-xs font-bold uppercase hover:bg-[#adc6ff] transition-colors">
+          <span class="material-symbols-outlined text-sm">download</span>
+          Exportar Todas las Comparaciones
+        </button>
+      </div>
+    </main>
+  </div>
+
+  <!--
+      ══════════════════════════════════════════════════════════
+      PLANTILLA OCULTA — JS clona este template para cada nueva
+      comparación creada con #btnAgregarComparacion o #btnComparar
+      ══════════════════════════════════════════════════════════
+    -->
+  <template id="tmplComparacionBlock">
+    <section
+      class="comparacion-block bg-surface-container-lowest rounded-lg shadow-sm overflow-hidden border border-outline-variant/20"
+      data-comparacion-id="" data-tipo-comparacion="" data-scope="" data-metodo-a="" data-metodo-b="">
+      <div
+        class="bg-surface-container-low px-6 py-3 flex justify-between items-center border-b border-outline-variant/20">
+        <div class="flex items-center gap-3">
+          <div class="comparacion-badge bg-primary text-white text-[10px] font-bold px-2 py-0.5 rounded"></div>
+          <h3 class="text-sm font-bold text-on-surface">
+            Comparación:
+            <span class="comparacion-contexto font-normal"></span>
+          </h3>
+          <span
+            class="text-[9px] font-bold uppercase bg-secondary/10 text-secondary px-2 py-0.5 rounded-full comparacion-tipo-label"></span>
+        </div>
+        <div class="flex items-center gap-3">
+          <button class="btnExportarBloque flex items-center gap-1 text-[10px] font-bold text-primary hover:underline"
+            data-comparacion-id="">
+            <span class="material-symbols-outlined text-sm">download</span>
+            EXPORTAR EXCEL
+          </button>
+          <button class="btnColapsarBloque text-on-surface-variant" title="Colapsar/Expandir">
+            <span class="material-symbols-outlined">expand_more</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="comparacion-body">
+        <!-- Sección Parámetros -->
+        <div class="comparacion-seccion-parametros" data-seccion="parametros">
+          <div class="px-6 py-2 bg-blue-50/50 border-b border-outline-variant/10 flex items-center gap-2">
+            <span class="material-symbols-outlined text-xs text-primary">list_alt</span>
+            <span class="text-[10px] font-black uppercase text-primary tracking-wider">Parámetros</span>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse tablaResultados">
+              <thead class="sticky top-0 bg-surface-container-low z-10">
+                <tr class="text-[10px] font-bold uppercase text-outline border-b border-outline-variant/30">
+                  <th class="px-6 py-3 w-1/3">Nodo / Campo</th>
+                  <th class="px-6 py-3">Valor A</th>
+                  <th class="px-6 py-3">Valor B</th>
+                  <th class="px-4 py-3 w-44">
+                    <div class="flex items-center gap-1">
+                      <span>Estado</span>
+                      <select
+                        class="filtro-estado bg-transparent border-none p-0 text-[10px] font-bold uppercase focus:ring-0 cursor-pointer"
+                        data-comparacion-id="" data-seccion="parametros">
+                        <option value="todos">▾ Todos</option>
+                        <option value="igual">Igual</option>
+                        <option value="diferente">Diferente</option>
+                        <option value="solo-a">Solo en A</option>
+                        <option value="solo-b">Solo en B</option>
+                      </select>
+                    </div>
+                  </th>
+                </tr>
+              </thead>
+              <tbody class="text-xs tbodyParametros"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Sección DataSets -->
+        <div class="comparacion-seccion-datasets border-t border-outline-variant/20" data-seccion="datasets">
+          <div class="px-6 py-2 bg-cyan-50/50 border-b border-outline-variant/10 flex items-center gap-2">
+            <span class="material-symbols-outlined text-xs text-secondary">database</span>
+            <span class="text-[10px] font-black uppercase text-secondary tracking-wider">DataSets</span>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse tablaResultados">
+              <thead class="sticky top-0 bg-surface-container-low z-10">
+                <tr class="text-[10px] font-bold uppercase text-outline border-b border-outline-variant/30">
+                  <th class="px-6 py-3 w-1/3">Nodo / Campo</th>
+                  <th class="px-6 py-3">Valor A</th>
+                  <th class="px-6 py-3">Valor B</th>
+                  <th class="px-4 py-3 w-44">
+                    <div class="flex items-center gap-1">
+                      <span>Estado</span>
+                      <select
+                        class="filtro-estado bg-transparent border-none p-0 text-[10px] font-bold uppercase focus:ring-0 cursor-pointer"
+                        data-comparacion-id="" data-seccion="datasets">
+                        <option value="todos">▾ Todos</option>
+                        <option value="igual">Igual</option>
+                        <option value="diferente">Diferente</option>
+                        <option value="solo-a">Solo en A</option>
+                        <option value="solo-b">Solo en B</option>
+                      </select>
+                    </div>
+                  </th>
+                </tr>
+              </thead>
+              <tbody class="text-xs tbodyDatasets"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div
+          class="comparacion-footer px-6 py-2 bg-surface-container-low/50 text-[10px] text-outline font-medium flex justify-between border-t border-outline-variant/10">
+          <span class="comparacion-stats">Nodos Analizados: 0 | Diferencias: 0</span>
+          <span class="flex items-center gap-3">
+            <span class="flex items-center gap-1">
+              <div class="w-2 h-2 rounded-full bg-green-500"></div>
+              Igual
+            </span>
+            <span class="flex items-center gap-1">
+              <div class="w-2 h-2 rounded-full bg-red-500"></div>
+              Diferente
+            </span>
+            <span class="flex items-center gap-1">
+              <div class="w-2 h-2 rounded-full bg-amber-500"></div>
+              Solo en A
+            </span>
+            <span class="flex items-center gap-1">
+              <div class="w-2 h-2 rounded-full bg-cyan-500"></div>
+              Solo en B
+            </span>
+          </span>
+        </div>
+      </div>
+      <!-- /comparacion-body -->
+    </section>
+  </template>
+  <!-- jQuery + Script principal -->
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"
+    integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=" crossorigin="anonymous"></script>
+  <script src="tracepacket-comparator.js"></script>
+</body>
+
 </html>
