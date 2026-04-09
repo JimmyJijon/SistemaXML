@@ -1,1347 +1,654 @@
 /**
  * Epicor tracePacket - XML Method Comparator
- * Arquitectura modular: TraceParser | ComparisonEngine | ComparisonStore | UIRenderer
- * v2.0 — Compara parámetros y DataSets con lógica semántica estricta
+ * Reconstrucción desde cero de la lógica
  */
 
 $(function () {
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // CONSTANTES Y CONFIGURACIÓN GLOBAL
-  // ════════════════════════════════════════════════════════════════════════════
-
-  /** Enum de estados de comparación (case-sensitive) */
+  
   const STATUS = Object.freeze({
-    IGUAL:     'igual',
+    IGUAL: 'igual',
     DIFERENTE: 'diferente',
-    SOLO_A:    'solo-a',
-    SOLO_B:    'solo-b',
+    SOBRANTE: 'sobrante',
+    FALTANTE: 'faltante'
   });
 
-  /** Business Objects que se deben ignorar completamente */
-  const BO_IGNORADOS = ['Ice.Proxy.BO.ReportMonitorImpl'];
-
-  /**
-   * Campos de clave primaria de Epicor, en orden de prioridad.
-   * Se usan para construir el recordKey de cada fila de DataSet.
-   */
   const EPICOR_PK_FIELDS = [
     'SysRowID', 'JobNum', 'OrderNum', 'OrderLine', 'OrderRelNum',
     'PONum', 'POLine', 'PORelNum', 'QuoteNum', 'QuoteLine',
     'AssemblySeq', 'OprSeq', 'PartNum', 'CustNum', 'VendorNum',
-    'Company',
+    'Company'
   ];
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // MÓDULO: TraceParser
-  // Responsabilidad: transformar XML crudo en lista de TraceExecution.
-  // ════════════════════════════════════════════════════════════════════════════
+  const BO_IGNORADOS = ['Ice.Proxy.BO.ReportMonitorImpl'];
 
-  const TraceParser = (function () {
+  // ==========================================
+  // XmlParser
+  // ==========================================
+  const XmlParser = (function () {
+    
+    function parsearXML(xmlString) {
+      // Remover cabeceras XML que rompan el parsing sin un wrapper global y encerrar todo
+      const raw = xmlString.trim().replace(/<\?xml[^?]*\?>/gi, '').trim();
+      const wrapped = `<root>${raw}</root>`;
+      const doc = new DOMParser().parseFromString(wrapped, 'application/xml');
 
-    /**
-     * Envuelve el XML en un nodo raíz para que DOMParser lo acepte
-     * aunque haya múltiples <tracePacket> sin nodo raíz.
-     */
-    function _wrap(raw) {
-      const noDecl = raw.trim().replace(/<\?xml[^?]*\?>/gi, '').trim();
-      return `<root>${noDecl}</root>`;
-    }
+      if (doc.querySelector('parsererror')) {
+        throw new Error('El archivo no es un XML válido o su sintaxis está rota.');
+      }
 
+      const packets = Array.from(doc.querySelectorAll('tracePacket'));
+      if (!packets.length) throw new Error('No se encontraron transacciones <tracePacket>.');
 
-    /**
-     * Extrae el mapa de SOLO parámetros simples (texto/CDATA) de una sección.
-     * Ignora deliberadamente cualquier <parameter> que tenga nodos hijos XML
-     * (esos son DataSets y los maneja _extractDatasets).
-     *
-     * Devuelve Map<name, {name, type, value}>
-     */
-    function _extractParamMap(sectionEl, childTag) {
-      const map = new Map();
-      $(sectionEl).find(`> ${childTag}`).each(function () {
-        // Si tiene hijos elemento reales → es un DataSet; lo saltamos aquí.
-        if (this.children && this.children.length > 0) return;
+      const ejecuciones = [];
+      let idx = 0;
+      const countNombres = {};
 
-        const name  = $(this).attr('name') || '';
-        const type  = $(this).attr('type') || '';
-        // El valor viene como texto plano o CDATA
-        const value = $(this).text().trim();
-        if (name) map.set(name, { name, type, value });
+      packets.forEach(packet => {
+        const metodo = $(packet).find('> methodName').text().trim();
+        if (!metodo) return;
+
+        const bo = $(packet).find('> businessObject').text().trim() || 
+                   $(packet).find('> objectName').text().trim() || '';
+
+        // Ignorar rutinas recurrentes de monitoreo si existen
+        if (BO_IGNORADOS.some(b => bo.includes(b) || metodo.includes(b))) return;
+
+        idx++;
+        countNombres[metodo] = (countNombres[metodo] || 0) + 1;
+
+        ejecuciones.push({
+          globalIndex: idx,
+          methodIndex: countNombres[metodo],
+          label: `${metodo} [${countNombres[metodo]}]`,
+          metodo: metodo,
+          businessObject: bo,
+          input: {
+            parametros: extraerParametros(packet, 'parameters', 'parameter'),
+            datasets: extraerDatasets(packet, 'parameters', 'parameter')
+          },
+          output: {
+            parametros: extraerParametros(packet, 'returnValues', 'returnParameter'),
+            datasets: extraerDatasets(packet, 'returnValues', 'returnParameter')
+          }
+        });
       });
-      return map;
+
+      return ejecuciones;
     }
 
-    /**
-     * Extrae DataSets de una sección específica del tracePacket.
-     *
-     * Estructura REAL del XML de Epicor (sin diffgram):
-     *
-     *   <parameters>
-     *     <parameter name="ds" type="Erp.BO.JobEntryDataSet">
-     *       <JobEntryDataSet xmlns="...">          ← DataSet raíz
-     *         <JobHead>                            ← fila de tabla "JobHead"
-     *           <Company>PLA01</Company>           ← campo
-     *           ...
-     *         </JobHead>
-     *         <JobHead> ... </JobHead>             ← segunda fila (si existe)
-     *       </JobEntryDataSet>
-     *     </parameter>
-     *   </parameters>
-     *
-     *   <returnValues>
-     *     <returnParameter name="ds" type="Erp.Tablesets.JobEntryTableset">
-     *       <JobEntryDataSet xmlns="...">
-     *         <JobHead> ... </JobHead>
-     *       </JobEntryDataSet>
-     *     </returnParameter>
-     *   </returnValues>
-     *
-     * @param {Element} packetEl   - El elemento <tracePacket> completo
-     * @param {string}  section    - 'input' | 'output'
-     * @returns {Map<dsName, Map<tableName, Row[]>>}
-     */
-    function _extractDatasets(packetEl, section) {
+    function extraerParametros(packet, sectionTag, itemTag) {
+      const mapa = new Map();
+      const seccion = packet.querySelector(sectionTag);
+      if (!seccion) return mapa;
+
+      Array.from(seccion.children).forEach(param => {
+        const tag = param.localName || param.nodeName;
+        if (!tag.includes(itemTag)) return;
+        
+        // Si tiene hijos elementos, no es un par de clave/valor simple, es un DataSet.
+        if (param.children && param.children.length > 0) return;
+
+        const name = $(param).attr('name') || '';
+        const type = $(param).attr('type') || '';
+        const val = $(param).text().trim();
+
+        if (name) mapa.set(name, { name, type, value: val });
+      });
+      return mapa;
+    }
+
+    function extraerDatasets(packet, sectionTag, itemTag) {
       const datasets = new Map();
+      const seccion = packet.querySelector(sectionTag);
+      if (!seccion) return datasets;
 
-      // Seleccionar la sección correcta según input u output
-      const sectionTag   = section === 'input' ? 'parameters'   : 'returnValues';
-      const childTag     = section === 'input' ? 'parameter'     : 'returnParameter';
-      const sectionEl    = packetEl.querySelector(sectionTag);
-      if (!sectionEl) return datasets;
+      Array.from(seccion.children).forEach(param => {
+        const tag = param.localName || param.nodeName;
+        if (!tag.includes(itemTag)) return;
+        if (!param.children || param.children.length === 0) return;
 
-      // Iterar sobre cada <parameter> / <returnParameter>
-      Array.from(sectionEl.children).forEach(function (paramEl) {
-        const paramTag = paramEl.localName || paramEl.nodeName;
-        if (paramTag !== childTag) return;
-
-        // Solo nos interesan los que tienen nodos hijo XML (DataSets)
-        // Los parámetros simples tienen solo texto/CDATA (children.length === 0)
-        if (!paramEl.children || paramEl.children.length === 0) return;
-
-        // ── Nivel 1: <JobEntryDataSet xmlns="..."> ─────────────────────────
-        Array.from(paramEl.children).forEach(function (dsEl) {
-          // dsEl es el raíz del DataSet, ej: <JobEntryDataSet>
-          const dsName = dsEl.localName || dsEl.nodeName;
-
-          // Ignorar ContextDataSet de Ice (no es un DataSet de negocio)
-          if (dsName === 'ContextDataSet') return;
+        Array.from(param.children).forEach(dsEl => {
+          let dsName = dsEl.localName || dsEl.nodeName;
+          if (dsName.includes(':')) dsName = dsName.split(':')[1];
+          if (dsName === 'ContextDataSet') return; // Excluir Contexto
 
           if (!datasets.has(dsName)) datasets.set(dsName, new Map());
           const tblMap = datasets.get(dsName);
 
-          // ── Nivel 2: <JobHead>, <JobProd>, etc. ───────────────────────────
-          // Cada hijo inmediato del DataSet es una FILA de una tabla.
-          // Si hay múltiples <JobHead>, son múltiples filas de la misma tabla.
-          Array.from(dsEl.children).forEach(function (tableRowEl) {
-            const tblName = tableRowEl.localName || tableRowEl.nodeName;
-            if (!tblMap.has(tblName)) tblMap.set(tblName, []);
+          // Algoritmo dinámico para leer filas de tablas saltando wrappers.
+          function findTables(node) {
+            if (node.nodeType !== 1) return; // Omitir texto
+            
+            const children = Array.from(node.children).filter(c => c.nodeType === 1);
+            if (children.length === 0) return; // Vacio 
 
-            // ── Nivel 3: campos de la fila ────────────────────────────────
-            // Solo extraemos filas que tengan al menos un campo hijo
-            if (!tableRowEl.children || tableRowEl.children.length === 0) return;
+            // Determinar si estoy parado en un nodo Fila (sus hijos son hojas = los campos)
+            const isRow = children.every(c => Array.from(c.children).filter(cc => cc.nodeType === 1).length === 0);
 
-            const row = {};
-            Array.from(tableRowEl.children).forEach(function (fieldEl) {
-              const fieldName = fieldEl.localName || fieldEl.nodeName;
-              // textContent da el valor limpio incluso si tiene CDATA
-              row[fieldName] = fieldEl.textContent || '';
-            });
+            if (isRow) {
+              let tblName = node.localName || node.nodeName;
+              if (tblName.includes(':')) tblName = tblName.split(':')[1];
 
-            if (Object.keys(row).length > 0) {
-              tblMap.get(tblName).push(row);
+              if (!tblMap.has(tblName)) tblMap.set(tblName, []);
+              const row = {};
+              children.forEach(field => {
+                let fname = field.localName || field.nodeName;
+                if (fname.includes(':')) fname = fname.split(':')[1];
+                row[fname] = field.textContent || '';
+              });
+              if (Object.keys(row).length > 0) tblMap.get(tblName).push(row);
+            } else {
+              // Navegar la rama hasta encontrar filas.
+              children.forEach(findTables);
             }
-          });
+          }
 
-          // Si el DataSet quedó completamente vacío (sin filas), lo dejamos igual
-          // porque puede indicar que el dataset existe pero está empty (válido para comparar)
+          Array.from(dsEl.children).forEach(findTables);
         });
       });
-
-      // ── LOG DE DIAGNÓSTICO (temporal) ──────────────────────────────────────
-      if (datasets.size > 0) {
-        console.group(`[TraceParser] _extractDatasets [${section}]`);
-        datasets.forEach((tblMap, dsName) => {
-          console.group(`  DataSet: ${dsName}`);
-          tblMap.forEach((rows, tblName) => {
-            console.log(`    Tabla: ${tblName} → ${rows.length} fila(s)`);
-            if (rows.length > 0) {
-              console.log(`      Campos: ${Object.keys(rows[0]).slice(0, 8).join(', ')}${Object.keys(rows[0]).length > 8 ? '…' : ''}`);
-            }
-          });
-          console.groupEnd();
-        });
-        console.groupEnd();
-      } else {
-        console.log(`[TraceParser] _extractDatasets [${section}]: sin DataSets en <${sectionTag}>`);
-      }
-
       return datasets;
     }
 
-    /**
-     * Parsea el XML crudo y retorna un array de TraceExecution:
-     * {
-     *   globalIndex,     // Posición absoluta en el archivo (1-based)
-     *   methodIndex,     // Índice para este methodName específico (1-based)
-     *   label,           // "MethodName [N]"
-     *   methodName,
-     *   businessObject,
-     *   input:  { parameters: Map, datasets: Map },
-     *   output: { parameters: Map, datasets: Map },
-     * }
-     */
-    function parse(raw) {
-      const wrapped = _wrap(raw);
-      const doc = new DOMParser().parseFromString(wrapped, 'application/xml');
-
-      if (doc.querySelector('parsererror')) {
-        throw new Error('El archivo no es un XML válido. Verifique el formato.');
-      }
-
-      const packets = doc.querySelectorAll('tracePacket');
-      if (!packets.length) {
-        throw new Error('No se encontraron elementos <tracePacket> en el archivo.');
-      }
-
-      const nameCount  = {};
-      const executions = [];
-      let   globalIdx  = 0;
-
-      packets.forEach(function (packet) {
-        const methodName = $(packet).find('> methodName').text().trim();
-        if (!methodName) return;
-
-        const businessObject = $(packet).find('> businessObject').text().trim()
-          || $(packet).find('> objectName').text().trim()
-          || $(packet).attr('service') || '';
-
-        // Ignorar BOs de la lista negra
-        if (BO_IGNORADOS.some(bo => businessObject.includes(bo) || methodName.includes(bo))) return;
-
-        globalIdx++;
-        nameCount[methodName] = (nameCount[methodName] || 0) + 1;
-        const methodIndex = nameCount[methodName];
-
-        // Extraer parámetros de entrada
-        const paramSection  = packet.querySelector('parameters');
-        const returnSection = packet.querySelector('returnValues');
-
-        const execution = {
-          globalIndex:    globalIdx,
-          methodIndex:    methodIndex,
-          label:          `${methodName} [${methodIndex}]`,
-          methodName:     methodName,
-          businessObject: businessObject,
-          input: {
-            parameters: paramSection
-              ? _extractParamMap(paramSection, 'parameter')
-              : new Map(),
-            datasets: _extractDatasets(packet, 'input'),
-          },
-          output: {
-            parameters: returnSection
-              ? _extractParamMap(returnSection, 'returnParameter')
-              : new Map(),
-            datasets: _extractDatasets(packet, 'output'),
-          },
-        };
-
-        // ── LOG DE DIAGNÓSTICO por método (temporal) ────────────────────────
-        console.group(`[TraceParser] [${execution.globalIndex}] ${execution.label}`);
-        console.log('  input.params  :', execution.input.parameters.size);
-        console.log('  input.datasets:', execution.input.datasets.size);
-        console.log('  output.params :', execution.output.parameters.size);
-        console.log('  output.datasets:', execution.output.datasets.size);
-        console.groupEnd();
-
-        executions.push(execution);
-
-      });
-
-      if (!executions.length) {
-        throw new Error('No se encontraron métodos válidos. Verifique que los <tracePacket> tengan <methodName>.');
-      }
-
-      return executions;
+    function obtenerBOs(ejecuciones) {
+      const bos = new Set(ejecuciones.map(e => e.businessObject || '(desconocido)'));
+      return [...bos].sort();
     }
 
-    /** Retorna lista única de businessObjects para poblar el selector */
-    function getBusinessObjects(executions) {
-      const bos = new Set(executions.map(e => e.businessObject || '(desconocido)'));
-      return [...bos].filter(Boolean).sort();
-    }
-
-    return { parse, getBusinessObjects };
+    return { parsearXML, obtenerBOs };
   })();
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // MÓDULO: ComparisonEngine
-  // Responsabilidad: normalizar y comparar dos conjuntos de datos (DataA vs DataB).
-  // ════════════════════════════════════════════════════════════════════════════
+  // ==========================================
+  // MotorComparacion
+  // ==========================================
+  const MotorComparacion = (function () {
 
-  const ComparisonEngine = (function () {
-
-    // ── Normalización ──────────────────────────────────────────────────────────
-
-    /**
-     * Determina el tipo de un valor para normalización.
-     * El type viene del XML como "System.Int32", "System.Boolean", etc.
-     */
-    function _typeCategory(typeStr) {
-      if (!typeStr) return 'string';
-      const t = typeStr.toLowerCase();
-      if (t.includes('int') || t.includes('decimal') || t.includes('double')
-          || t.includes('float') || t.includes('single') || t.includes('numeric'))
-        return 'numeric';
-      if (t.includes('bool')) return 'boolean';
-      return 'string';
-    }
-
-    /**
-     * Normaliza un valor antes de comparar.
-     * Reglas:
-     *  - Numérico: parseFloat → comparar valor real (0 == 0.00)
-     *  - Booleano: case-sensitive estricto (false != False)
-     *  - String:   trim() solamente
-     *  - null/undefined → cadena vacía para comparación
-     */
-    function normalize(value, typeStr) {
-      if (value === null || value === undefined) return '';
-      const str = String(value);
-      const cat = _typeCategory(typeStr);
-
-      if (cat === 'numeric') {
+    function _normalizar(val, type) {
+      if (val === null || val === undefined) return '';
+      const str = String(val).trim();
+      const t = (type || '').toLowerCase();
+      if (t.includes('int') || t.includes('decimal') || t.includes('double') || t.includes('numeric')) {
         const n = parseFloat(str);
-        return isNaN(n) ? str.trim() : n;
+        return isNaN(n) ? str : n;
       }
-      // Booleanos: NO alterar, solo trim
-      return str.trim();
+      return str;
     }
 
-    /**
-     * Compara dos valores normalizados.
-     * Devuelve true si son iguales.
-     */
-    function _valuesEqual(valA, typeA, valB, typeB) {
-      const nA = normalize(valA, typeA);
-      const nB = normalize(valB, typeB);
-      return nA === nB;
+    function _sonIguales(valA, typeA, valB, typeB) {
+      return _normalizar(valA, typeA) === _normalizar(valB, typeB);
     }
 
-    // ── Clave de Registro ──────────────────────────────────────────────────────
-
-    /**
-     * Construye el recordKey de una fila buscando campos primarios de Epicor.
-     * Si no hay ninguno, concatena todos los valores para garantizar unicidad.
-     */
     function buildRecordKey(row) {
-      const parts = [];
+      // Buscar la primera clave primaria válida en orden
       for (const pk of EPICOR_PK_FIELDS) {
-        if (pk in row && row[pk] !== '' && row[pk] !== null) {
-          parts.push(`${pk}=${row[pk]}`);
+        if (row[pk] !== undefined && row[pk] !== null && row[pk] !== '') {
+          return `${pk}=${row[pk]}`; 
         }
       }
-      if (parts.length) return parts.join('|');
-
-      // Fallback: hash de todos los valores
-      return Object.entries(row)
-        .filter(([, v]) => v !== null && v !== undefined)
-        .map(([k, v]) => `${k}=${v}`)
-        .join('|');
+      // Hash backup de todos los campos
+      return Object.entries(row).map(([k,v]) => `${k}=${v}`).join('|');
     }
 
-    // ── Comparación de Parámetros ──────────────────────────────────────────────
+    function compararParametros(mapA, mapB) {
+      const resultados = [];
+      const keys = new Set([...mapA.keys(), ...mapB.keys()]);
 
-    /**
-     * Compara dos Map<name, {name, type, value}> de parámetros.
-     * Devuelve lista de DiffResult.
-     * DiffResult: { category:'parametros', path, name, typeA, typeB, valA, valB, status }
-     */
-    function compareParameters(mapA, mapB) {
-      const results = [];
-      const allKeys = new Set([...mapA.keys(), ...mapB.keys()]);
+      keys.forEach(k => {
+        const a = mapA.get(k);
+        const b = mapB.get(k);
 
-      allKeys.forEach(key => {
-        const pA = mapA.get(key);
-        const pB = mapB.get(key);
-
-        if (pA && pB) {
-          const eq = _valuesEqual(pA.value, pA.type, pB.value, pB.type);
-          results.push({
-            category: 'parametros',
-            path:   `Parámetros.${key}`,
-            name:   key,
-            typeA:  pA.type,
-            typeB:  pB.type,
-            valA:   pA.value,
-            valB:   pB.value,
-            status: eq ? STATUS.IGUAL : STATUS.DIFERENTE,
+        if (a && b) {
+          const eq = _sonIguales(a.value, a.type, b.value, b.type);
+          resultados.push({
+            categoria: 'parametros', name: k,
+            valA: a.value, valB: b.value,
+            typeA: a.type, typeB: b.type,
+            status: eq ? STATUS.IGUAL : STATUS.DIFERENTE
           });
-        } else if (pA && !pB) {
-          results.push({
-            category: 'parametros',
-            path:   `Parámetros.${key}`,
-            name:   key,
-            typeA:  pA.type, typeB: '',
-            valA:   pA.value, valB: null,
-            status: STATUS.SOLO_A,
+        } else if (a) {
+          resultados.push({
+            categoria: 'parametros', name: k,
+            valA: a.value, valB: null,
+            status: STATUS.SOBRANTE // Input vs Output A -> Está en el Input y no en Output.
           });
         } else {
-          results.push({
-            category: 'parametros',
-            path:   `Parámetros.${key}`,
-            name:   key,
-            typeA: '', typeB: pB.type,
-            valA:   null, valB: pB.value,
-            status: STATUS.SOLO_B,
+          resultados.push({
+            categoria: 'parametros', name: k,
+            valA: null, valB: b.value,
+            status: STATUS.FALTANTE // Output A vs Input B -> Falta en A pero está en B.
+          });
+        }
+      });
+      
+      const order = { [STATUS.DIFERENTE]: 1, [STATUS.SOBRANTE]: 2, [STATUS.FALTANTE]: 3, [STATUS.IGUAL]: 4 };
+      return resultados.sort((x, y) => order[x.status] - order[y.status]);
+    }
+
+    function _aplanarTablas(datasetsMap) {
+      const mapa = new Map();
+      datasetsMap.forEach((tblMap, dsName) => {
+        tblMap.forEach((rows, tblName) => {
+          if (!mapa.has(tblName)) mapa.set(tblName, { rows: [], dsName });
+          mapa.get(tblName).rows.push(...rows);
+        });
+      });
+      return mapa;
+    }
+
+    function compararDatasets(datasetsA, datasetsB) {
+      const flatA = _aplanarTablas(datasetsA);
+      const flatB = _aplanarTablas(datasetsB);
+      const resultados = [];
+
+      // Marcadores Vaciados
+      if (flatA.size === 0 && datasetsA.size > 0) {
+        datasetsA.forEach((_, dsName) => resultados.push({
+          categoria: 'datasets', tblName: '(DataSet Vacío)', dsNameA: dsName, dsNameB: null,
+          recordKey: '-', fieldName: 'Info', valA: 'Sin tablas detectadas', valB: null, status: STATUS.IGUAL
+        }));
+      }
+      if (flatB.size === 0 && datasetsB.size > 0) {
+        datasetsB.forEach((_, dsName) => resultados.push({
+          categoria: 'datasets', tblName: '(DataSet Vacío)', dsNameA: null, dsNameB: dsName,
+          recordKey: '-', fieldName: 'Info', valA: null, valB: 'Sin tablas detectadas', status: STATUS.IGUAL
+        }));
+      }
+
+      const allTbls = new Set([...flatA.keys(), ...flatB.keys()]);
+
+      allTbls.forEach(tblName => {
+        const tbA = flatA.get(tblName);
+        const tbB = flatB.get(tblName);
+
+        const rowsA = tbA ? tbA.rows : [];
+        const rowsB = tbB ? tbB.rows : [];
+
+        const mapA = new Map(), mapB = new Map();
+        rowsA.forEach(r => mapA.set(buildRecordKey(r), r));
+        rowsB.forEach(r => mapB.set(buildRecordKey(r), r));
+
+        const keys = new Set([...mapA.keys(), ...mapB.keys()]);
+
+        keys.forEach(k => {
+          const rowA = mapA.get(k);
+          const rowB = mapB.get(k);
+
+          if (rowA && rowB) {
+            const fields = new Set([...Object.keys(rowA), ...Object.keys(rowB)]);
+            fields.forEach(f => {
+              const va = rowA[f];
+              const vb = rowB[f];
+              let st;
+              if (va !== undefined && vb !== undefined) {
+                 st = _sonIguales(va, 'string', vb, 'string') ? STATUS.IGUAL : STATUS.DIFERENTE;
+              } else if (va !== undefined) {
+                 st = STATUS.SOBRANTE;
+              } else {
+                 st = STATUS.FALTANTE;
+              }
+              resultados.push({
+                categoria: 'datasets', tblName, dsNameA: tbA?.dsName, dsNameB: tbB?.dsName,
+                recordKey: k, fieldName: f, valA: va, valB: vb, status: st
+              });
+            });
+          } else if (rowA) {
+            Object.keys(rowA).forEach(f => {
+              resultados.push({
+                categoria: 'datasets', tblName, dsNameA: tbA?.dsName, dsNameB: null,
+                recordKey: k, fieldName: f, valA: rowA[f], valB: null, status: STATUS.SOBRANTE
+              });
+            });
+          } else {
+            Object.keys(rowB).forEach(f => {
+              resultados.push({
+                categoria: 'datasets', tblName, dsNameA: null, dsNameB: tbB?.dsName,
+                recordKey: k, fieldName: f, valA: null, valB: rowB[f], status: STATUS.FALTANTE
+              });
+            });
+          }
+        });
+      });
+
+      return resultados;
+    }
+
+    function comparar(da, db, scope) {
+      return {
+        parametros: (scope === 'parametros' || scope === 'ambos') ? compararParametros(da.parametros, db.parametros) : [],
+        datasets: (scope === 'datasets' || scope === 'ambos') ? compararDatasets(da.datasets, db.datasets) : []
+      };
+    }
+
+    return { comparar };
+  })();
+
+  // ==========================================
+  // GestorEstado
+  // ==========================================
+  const GestorEstado = (function () {
+    const list = [];
+    let idCounter = 0;
+
+    function agregar(item) {
+      idCounter++;
+      item.id = `comp_${Date.now()}_${idCounter}`;
+      item.seqNum = idCounter;
+      list.push(item);
+      return item;
+    }
+
+    function eliminar(id) {
+      const i = list.findIndex(e => e.id === id);
+      if (i > -1) list.splice(i, 1);
+    }
+
+    function vaciar() { list.length = 0; idCounter = 0; }
+    function obtenerTodos() { return list; }
+    function obtener(id) { return list.find(e => e.id === id); }
+
+    return { agregar, eliminar, vaciar, obtenerTodos, obtener };
+  })();
+
+  // ==========================================
+  // ControladorUI
+  // ==========================================
+  const ControladorUI = (function () {
+    let _ejecuciones = [];
+
+    function _mostrarToast(msg, error = false) {
+      const color = error ? 'bg-red-600' : 'bg-green-600';
+      const $t = $(`<div class="fixed bottom-6 right-6 z-50 px-4 py-3 rounded-lg shadow-xl text-white text-xs font-bold ${color}">${msg}</div>`).appendTo('body');
+      setTimeout(() => $t.fadeOut(300, () => $t.remove()), 3000);
+    }
+
+    function _escapar(str) {
+      return str == null ? '' : String(str).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function _formatoValor(val) {
+      if (val === null || val === undefined) return `<span class="italic text-gray-500/50 text-[10px]">—</span>`;
+      if (String(val).trim() === '') return `<span class="italic text-amber-500/80 text-[10px] font-semibold">VACÍO</span>`;
+      return `<strong class="font-mono text-[11px] font-normal">${_escapar(val)}</strong>`;
+    }
+
+    function _badge(estado) {
+      const b = {
+        [STATUS.IGUAL]: '<span class="px-2 py-0.5 rounded text-[9px] font-bold bg-green-100 text-green-700">IGUAL</span>',
+        [STATUS.DIFERENTE]: '<span class="px-2 py-0.5 rounded text-[9px] font-bold bg-red-100 text-red-700">DIFERENTE</span>',
+        [STATUS.SOBRANTE]: '<span class="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800">SOBRANTE</span>',
+        [STATUS.FALTANTE]: '<span class="px-2 py-0.5 rounded text-[9px] font-bold bg-rose-100 text-rose-700">FALTANTE</span>'
+      };
+      return b[estado] || estado;
+    }
+
+    // Handlers Generales
+    $('#dropZone, #fileInput').on('change drop', function(e) {
+      e.preventDefault();
+      const file = e.type === 'drop' ? e.originalEvent.dataTransfer.files[0] : (e.target.files ? e.target.files[0] : null);
+      if (!file) return;
+
+      $('#fileName').text(file.name);
+      
+      const reader = new FileReader();
+      reader.onload = e => {
+        try {
+          _ejecuciones = XmlParser.parsearXML(e.target.result);
+          _llenarCombos();
+          _mostrarToast(`¡Éxito! Se procesaron ${_ejecuciones.length} métodos.`);
+        } catch (err) {
+          _mostrarToast(err.message, true);
+        }
+      };
+      reader.readAsText(file, 'UTF-8');
+    }).on('dragover', e => e.preventDefault());
+
+    $('#btnCargarXml, #dropZone').on('click', function(e) {
+      if (e.target.id === 'fileInput') return; 
+      $('#fileInput')[0].click();
+    });
+
+    $('#btnRemoveFile').on('click', () => {
+      _ejecuciones = [];
+      $('#fileName').text('Sin archivo');
+      $('#fileInput').val('');
+      GestorEstado.vaciar();
+      $('#comparisonsContainer').empty();
+      $('#emptyState').show();
+      _llenarCombos();
+    });
+
+    function _llenarCombos() {
+      const bos = XmlParser.obtenerBOs(_ejecuciones);
+      ['#selectBusinessObjectA', '#selectBusinessObjectB'].forEach(s => {
+        $(s).empty().append('<option value="">— Seleccione BO —</option>');
+        bos.forEach(b => $(s).append(`<option value="${b}">${b}</option>`));
+        if (bos.length === 1) $(s).val(bos[0]).trigger('change');
+      });
+    }
+
+    $('#selectBusinessObjectA, #selectBusinessObjectB').on('change', function() {
+      const sId = this.id.endsWith('A') ? '#selectMetodoA' : '#selectMetodoB';
+      const bo = $(this).val();
+      $(sId).empty().append('<option value="">— Seleccione Método —</option>');
+      _ejecuciones.filter(e => e.businessObject === bo || !bo).forEach(e => {
+        $(sId).append(`<option value="${e.label}">[${e.globalIndex}] ${e.label}</option>`);
+      });
+    });
+
+    $('#tipoComparacion').on('change', function() {
+      const needsB = $(this).val() === 'output-vs-input';
+      $('#selectBusinessObjectB, #selectMetodoB').prop('disabled', !needsB)
+        .parent().toggleClass('opacity-40', !needsB);
+    });
+
+    $('#btnAgregarComparacion, #btnComparar').on('click', function() {
+      if (!_ejecuciones.length) return _mostrarToast('Carga un archivo XML primero.', true);
+      
+      const labelA = $('#selectMetodoA').val();
+      const labelB = $('#selectMetodoB').val();
+      const tipo = $('#tipoComparacion').val();
+      const scope = $('#tipoDatoComparado').val();
+
+      if (tipo !== 'input-vs-output' && tipo !== 'output-vs-input') {
+        return _mostrarToast('Modo de comparación no soportado. Abortando.', true);
+      }
+
+      if (!labelA) return _mostrarToast('Selecciona el Método A', true);
+      if (tipo === 'output-vs-input' && !labelB) return _mostrarToast('Selecciona el Método B', true);
+
+      const ea = _ejecuciones.find(e => e.label === labelA);
+      const eb = tipo === 'output-vs-input' ? _ejecuciones.find(e => e.label === labelB) : ea;
+
+      let dataA, dataB, contexto;
+      if (tipo === 'input-vs-output') {
+        dataA = ea.input; dataB = ea.output;
+        contexto = `Input ${ea.label} vs Output ${ea.label}`;
+      } else {
+        dataA = ea.output; dataB = eb.input;
+        contexto = `Output ${ea.label} vs Input ${eb.label}`;
+      }
+
+      const resul = MotorComparacion.comparar(dataA, dataB, scope);
+      const item = GestorEstado.agregar({ labelA, labelB, tipo, scope, contexto, resultados: resul });
+      
+      _renderTablas(item);
+    });
+
+    function _renderTablas(item) {
+      const tmpl = $('#tmplComparacionBlock')[0].content.cloneNode(true);
+      const $b = $(tmpl).find('.comparacion-block');
+      
+      $b.attr('data-comparacion-id', item.id);
+      $b.find('.comparacion-badge').text('C' + item.seqNum);
+      $b.find('.comparacion-contexto').text(item.contexto);
+      $b.find('.comparacion-tipo-label').text(item.tipo === 'input-vs-output' ? 'Input A → Output A' : 'Output A → Input B');
+
+      const tbodyP = $b.find('.tbodyParametros');
+      const tbodyD = $b.find('.tbodyDatasets');
+
+      if (item.scope !== 'datasets') {
+        item.resultados.parametros.forEach(r => {
+          tbodyP.append(`
+            <tr class="border-b border-outline-variant/10 hover:bg-surface-container-low transition-colors data-${r.status}" data-estado="${r.status}">
+              <td class="px-6 py-2 pl-10 font-mono text-xs">${_escapar(r.name)} <span class="text-[9px] text-gray-500">${r.typeA || r.typeB}</span></td>
+              <td class="px-6 py-2 w-1/4 break-words">${_formatoValor(r.valA)}</td>
+              <td class="px-6 py-2 w-1/4 break-words">${_formatoValor(r.valB)}</td>
+              <td class="px-6 py-2">${_badge(r.status)}</td>
+            </tr>
+          `);
+        });
+        if (!item.resultados.parametros.length) tbodyP.append('<tr><td colspan="4" class="text-center p-4 text-xs italic text-gray-400">Sin parámetros procesados.</td></tr>');
+      } else {
+        $b.find('.comparacion-seccion-parametros').hide();
+      }
+
+      if (item.scope !== 'parametros') {
+        // Agrupar filas para ordenar el display visualmente 
+        const tbm = new Map();
+        item.resultados.datasets.forEach(r => {
+          if(!tbm.has(r.tblName)) tbm.set(r.tblName, new Map());
+          if(!tbm.get(r.tblName).has(r.recordKey)) tbm.get(r.tblName).set(r.recordKey, []);
+          tbm.get(r.tblName).get(r.recordKey).push(r);
+        });
+
+        if (tbm.size === 0) {
+          tbodyD.append('<tr><td colspan="4" class="text-center p-4 text-xs italic text-gray-400">Sin DataSets encontrados.</td></tr>');
+        } else {
+          tbm.forEach((filas, tname) => {
+            // Header: Fila de Tabla
+            let rootLabel = '';
+            const testField = filas.values().next().value?.[0]; // Inspeccionar una celda de sample
+            if (testField && testField.dsNameA) rootLabel += `A: ${testField.dsNameA}`;
+            if (testField && testField.dsNameB) rootLabel += (rootLabel ? ' | ' : '') + `B: ${testField.dsNameB}`;
+
+            tbodyD.append(`
+              <tr class="bg-surface-container-low font-bold border-b border-outline-variant/10" data-table="${tname}">
+                <td colspan="4" class="px-6 py-2 text-on-surface font-mono text-xs flex gap-2 items-center">
+                  <span class="material-symbols-outlined text-[14px]">table_rows</span> ${tname} 
+                  <span class="text-[9px] font-normal text-gray-500">(${rootLabel || 'N/A'})</span>
+                </td>
+              </tr>
+            `);
+
+            filas.forEach((campos, rkey) => {
+              // Sub Header: Fila Identificadora de Row
+              tbodyD.append(`
+                <tr class="bg-surface-container-low/40 border-b border-outline-variant/10 text-xs text-on-surface" data-record="${rkey}">
+                  <td colspan="4" class="px-6 py-1.5 pl-10 font-bold flex gap-2 items-center">
+                     <span class="material-symbols-outlined text-[12px]">dataset</span> ID Registro: ${rkey}
+                  </td>
+                </tr>
+              `);
+              
+              // Ordenar celdas priorizando diferentes arriba
+              const sorteados = campos.sort((a,b) => {
+                const s1 = a.status === STATUS.IGUAL ? 1 : 0;
+                const s2 = b.status === STATUS.IGUAL ? 1 : 0;
+                return s1 - s2;
+              });
+              
+              sorteados.forEach(c => {
+                tbodyD.append(`
+                  <tr class="border-b border-outline-variant/10 hover:bg-surface-container-low transition-colors data-${c.status}" data-estado="${c.status}">
+                    <td class="px-6 py-1.5 pl-[72px] text-[11px] font-mono">${_escapar(c.fieldName)}</td>
+                    <td class="px-6 py-1.5 w-1/4 break-words">${_formatoValor(c.valA)}</td>
+                    <td class="px-6 py-1.5 w-1/4 break-words">${_formatoValor(c.valB)}</td>
+                    <td class="px-6 py-1.5">${_badge(c.status)}</td>
+                  </tr>
+                `);
+              });
+            });
+          });
+        }
+      } else {
+         $b.find('.comparacion-seccion-datasets').hide();
+      }
+
+      // Eventos del nuevo bloque inyectado
+      $b.find('.btnEliminarBloque').attr('data-id', item.id).on('click', function() {
+        GestorEstado.eliminar(item.id);
+        $b.slideUp(200, () => {
+           $b.remove();
+           if (!$('.comparacion-block').length) $('#emptyState').show();
+        });
+      });
+
+      $b.find('.btnColapsarBloque').on('click', function() {
+        $b.find('.comparacion-body').slideToggle();
+        const $i = $(this).find('span');
+        $i.text($i.text().includes('expand_more') ? 'expand_less' : 'expand_more');
+      });
+
+      $b.find('.btnExportarBloque').on('click', () => _exportarCSV(item));
+
+      // Filtro local en Acordeon 
+      $b.find('.filtro-estado').on('change', function() {
+        const val = $(this).val();
+        const sec = $(this).attr('data-seccion');
+        const tb = sec === 'parametros' ? tbodyP : tbodyD;
+        
+        // Hide/Show celdas
+        tb.find('tr[data-estado]').each(function() {
+          $(this).toggle(val === 'todos' || $(this).data('estado') === val);
+        });
+
+        // Hide/Show agrupadores para no dejar tables colgadas sin rows child
+        if (sec === 'datasets') {
+          tb.find('tr[data-record]').each(function() {
+            const vis = $(this).nextUntil('tr[data-record], tr[data-table]').filter(':visible').length > 0;
+            $(this).toggle(vis);
+          });
+          tb.find('tr[data-table]').each(function() {
+            const vis = $(this).nextUntil('tr[data-table]').filter(':visible').length > 0;
+            $(this).toggle(vis);
           });
         }
       });
 
-      // Ordenar: diferente/solo primero, igual al final
-      const order = { [STATUS.DIFERENTE]: 0, [STATUS.SOLO_A]: 1, [STATUS.SOLO_B]: 2, [STATUS.IGUAL]: 3 };
-      return results.sort((a, b) => (order[a.status] || 0) - (order[b.status] || 0));
+      $('#emptyState').hide();
+      $('#comparisonsContainer').prepend($b);
+      // Animamos el scroll al nuevo insert
+      $('html, body').animate({ scrollTop: $b.offset().top - 80 }, 400); 
+      _mostrarToast(`Comparación C${item.seqNum} añadida con éxito.`);
     }
 
-    // ── Comparación de DataSets ────────────────────────────────────────────────
+    // Exportador de datos 
+    function _exportarCSV(item) {
+      if (!item) return;
+      const mapLegacy = { [STATUS.IGUAL]: 'igual', [STATUS.DIFERENTE]: 'diferente', [STATUS.SOBRANTE]: 'solo-a', [STATUS.FALTANTE]: 'solo-b' };
+      const csv = ['Contexto,Categoria,SubRuta,Campo,ValorA,ValorB,Estado,Estado_Legacy'];
+      
+      const cel = v => v ? `"${String(v).replace(/"/g, '""')}"` : '';
 
-    /**
-     * Compara dos Map<dsName, Map<tblName, Row[]>> de datasets.
-     * Devuelve lista de DiffResult más detallados con flatKey y recordKey.
-     * DiffResult: { category:'datasets', dsName, tableName, recordKey, flatKey, fieldName, typeA, typeB, valA, valB, status }
-     */
-    function compareDatasets(datasetsA, datasetsB) {
-      const results = [];
-      const allDs = new Set([...datasetsA.keys(), ...datasetsB.keys()]);
-
-      allDs.forEach(dsName => {
-        const tablesA = datasetsA.get(dsName) || new Map();
-        const tablesB = datasetsB.get(dsName) || new Map();
-        const allTbls = new Set([...tablesA.keys(), ...tablesB.keys()]);
-
-        allTbls.forEach(tblName => {
-          const rowsA = tablesA.get(tblName) || [];
-          const rowsB = tablesB.get(tblName) || [];
-
-          // Indexar por recordKey
-          const mapA = new Map();
-          rowsA.forEach(row => mapA.set(buildRecordKey(row), row));
-          const mapB = new Map();
-          rowsB.forEach(row => mapB.set(buildRecordKey(row), row));
-
-          const allRecords = new Set([...mapA.keys(), ...mapB.keys()]);
-
-          allRecords.forEach(recKey => {
-            const rowA = mapA.get(recKey);
-            const rowB = mapB.get(recKey);
-
-            if (rowA && rowB) {
-              // Comparar campo a campo
-              const allFields = new Set([...Object.keys(rowA), ...Object.keys(rowB)]);
-              allFields.forEach(field => {
-                const vA = rowA[field];
-                const vB = rowB[field];
-                let status;
-                if (vA !== undefined && vB !== undefined) {
-                  // FIX 1: Inferir tipo numérico desde el valor (DataSets no traen type en XML).
-                  // Si AMBOS valores son parseable como número → comparar como número.
-                  // Esto evita falsos DIFERENTE entre "0" y "0.00", "1" y "1.0", etc.
-                  const nA = parseFloat(vA);
-                  const nB = parseFloat(vB);
-                  const bothNumeric = !isNaN(nA) && !isNaN(nB) && String(vA).trim() !== '' && String(vB).trim() !== '';
-                  const typeHint = bothNumeric ? 'numeric' : '';
-                  status = _valuesEqual(vA, typeHint, vB, typeHint) ? STATUS.IGUAL : STATUS.DIFERENTE;
-                } else if (vA !== undefined) {
-                  status = STATUS.SOLO_A;
-                } else {
-                  status = STATUS.SOLO_B;
-                }
-                results.push({
-                  category:  'datasets',
-                  dsName,
-                  tableName: tblName,
-                  recordKey: recKey,
-                  flatKey:   `${tblName}.${field}`,
-                  fieldName: field,
-                  typeA: '', typeB: '',
-                  valA: vA !== undefined ? vA : null,
-                  valB: vB !== undefined ? vB : null,
-                  status,
-                });
-              });
-            } else if (rowA && !rowB) {
-              // Fila entera solo en A
-              Object.keys(rowA).forEach(field => {
-                results.push({
-                  category:  'datasets',
-                  dsName, tableName: tblName,
-                  recordKey: recKey,
-                  flatKey:   `${tblName}.${field}`,
-                  fieldName: field,
-                  typeA: '', typeB: '',
-                  valA: rowA[field], valB: null,
-                  status: STATUS.SOLO_A,
-                });
-              });
-            } else {
-              // Fila entera solo en B
-              Object.keys(rowB).forEach(field => {
-                results.push({
-                  category:  'datasets',
-                  dsName, tableName: tblName,
-                  recordKey: recKey,
-                  flatKey:   `${tblName}.${field}`,
-                  fieldName: field,
-                  typeA: '', typeB: '',
-                  valA: null, valB: rowB[field],
-                  status: STATUS.SOLO_B,
-                });
-              });
-            }
-          });
-        });
+      item.resultados.parametros.forEach(p => {
+        csv.push(`"${item.contexto}","Parametros","Params","${p.name}",${cel(p.valA)},${cel(p.valB)},${p.status},${mapLegacy[p.status]}`);
+      });
+      item.resultados.datasets.forEach(d => {
+        csv.push(`"${item.contexto}","DataSets","${d.tblName}[${d.recordKey}]","${d.fieldName}",${cel(d.valA)},${cel(d.valB)},${d.status},${mapLegacy[d.status]}`);
       });
 
-      return results;
+      const blob = new Blob(['\uFEFF' + csv.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `C${item.seqNum}_export_${Date.now()}.csv`;
+      a.click();
     }
 
-    /**
-     * Punto de entrada principal del motor.
-     * dataA/B = { parameters: Map, datasets: Map }
-     * scope   = 'parametros' | 'datasets' | 'ambos'
-     */
-    function run(dataA, dataB, scope) {
-      let paramResults = [];
-      let dsResults    = [];
-
-      if (scope === 'parametros' || scope === 'ambos') {
-        paramResults = compareParameters(dataA.parameters, dataB.parameters);
+    $('#btnExportarExcel').on('click', () => {
+      GestorEstado.obtenerTodos().forEach(i => _exportarCSV(i));
+    });
+    
+    $('#btnLimpiar').on('click', () => {
+      if (confirm('¿Deseas eliminar todas las comparaciones de la interfaz?')) {
+        GestorEstado.vaciar();
+        $('#comparisonsContainer').empty();
+        $('#emptyState').show();
+        _mostrarToast('Historial limpio.', false);
       }
-      if (scope === 'datasets' || scope === 'ambos') {
-        dsResults = compareDatasets(dataA.datasets, dataB.datasets);
-      }
+    });
 
-      return { paramResults, dsResults };
-    }
+    // Resetear en onLoad
+    $('#tipoComparacion').trigger('change');
 
-    return { run, normalize, buildRecordKey };
   })();
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // MÓDULO: ComparisonStore
-  // Responsabilidad: persistir histórico de comparaciones en la sesión.
-  // ════════════════════════════════════════════════════════════════════════════
-
-  const ComparisonStore = (function () {
-    const _comparisons = []; // Array de ComparisonUnit
-    let   _counter     = 0;
-
-    function add(unit) {
-      _counter++;
-      unit.seqNum = _counter;
-      _comparisons.push(unit);
-      return unit;
-    }
-
-    function getAll()     { return [..._comparisons]; }
-    function count()      { return _comparisons.length; }
-    function clear()      { _comparisons.length = 0; _counter = 0; }
-    function getById(id)  { return _comparisons.find(c => c.id === id); }
-
-    return { add, getAll, count, clear, getById };
-  })();
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // MÓDULO: UIRenderer
-  // Responsabilidad: generar y gestionar el DOM de resultados.
-  // ════════════════════════════════════════════════════════════════════════════
-
-  const UIRenderer = (function () {
-
-    // ── Helpers ────────────────────────────────────────────────────────────────
-
-    function _esc(str) {
-      if (str === null || str === undefined) return '';
-      return String(str)
-        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    }
-
-    function _valDisplay(val, altClass) {
-      if (val === null || val === undefined) {
-        return `<span class="italic text-outline/40 text-[11px]">—</span>`;
-      }
-      return `<span class="font-mono text-[11px] ${altClass || ''}">${_esc(String(val))}</span>`;
-    }
-
-    /** Badge visual de estado */
-    // FIX 6: _badge ahora acepta un segundo argumento opcional con el tipo de comparación
-    // para mostrar etiquetas semánticas en lugar del técnico "SOLO EN A / SOLO EN B".
-    function _badge(status, tipoComparacion) {
-      const map = {
-        [STATUS.IGUAL]:     'bg-green-100 text-green-700',
-        [STATUS.DIFERENTE]: 'bg-red-100 text-red-700',
-        [STATUS.SOLO_A]:    'bg-amber-100 text-amber-800',
-        [STATUS.SOLO_B]:    'bg-cyan-100 text-cyan-800',
-      };
-      // Etiquetas contextuales según el tipo de comparación
-      let labelSoloA, labelSoloB;
-      if (tipoComparacion === 'input-vs-output') {
-        labelSoloA = 'SOLO EN INPUT';
-        labelSoloB = 'SOLO EN OUTPUT';
-      } else if (tipoComparacion === 'output-vs-input') {
-        labelSoloA = 'SOLO EN OUTPUT A';
-        labelSoloB = 'SOLO EN INPUT B';
-      } else {
-        labelSoloA = 'SOLO EN A';
-        labelSoloB = 'SOLO EN B';
-      }
-      const label = {
-        [STATUS.IGUAL]:     'IGUAL',
-        [STATUS.DIFERENTE]: 'DIFERENTE',
-        [STATUS.SOLO_A]:    labelSoloA,
-        [STATUS.SOLO_B]:    labelSoloB,
-      };
-      const cls = map[status] || 'bg-gray-100 text-gray-700';
-      return `<span class="px-2 py-0.5 rounded-full ${cls} text-[9px] font-bold">${label[status] || status}</span>`;
-    }
-
-    /** Prefijo de sangría por nivel */
-    function _indent(level) {
-      const pxMap = { 0: 'pl-6', 1: 'pl-10', 2: 'pl-16', 3: 'pl-24', 4: 'pl-32' };
-      return pxMap[Math.min(level, 4)] || 'pl-32';
-    }
-
-    /** Icono de expand/collapse */
-    function _toggleIcon(expanded) {
-      return expanded
-        ? '<span class="material-symbols-outlined text-xs toggle-icon">expand_more</span>'
-        : '<span class="material-symbols-outlined text-xs toggle-icon">chevron_right</span>';
-    }
-
-    // ── Construcción de filas de parámetros ───────────────────────────────────
-
-    /**
-     * Genera el <tbody> de la tabla de parámetros para un bloque.
-     * Agrupa todas las filas bajo un nodo raíz "Parámetros".
-     */
-    // FIX 6: _buildParamRows y _buildDatasetRows reciben tipoComparacion para badges semánticos
-    function _buildParamRows(paramResults, compId, tipoComparacion) {
-      if (!paramResults.length) {
-        return `<tr><td colspan="4" class="px-6 py-8 text-center text-outline text-xs italic">Sin parámetros para comparar.</td></tr>`;
-      }
-
-      const rootId     = `${compId}-sec-params`;
-      const totalDiffs = paramResults.filter(r => r.status !== STATUS.IGUAL).length;
-      let html = '';
-
-      // Nodo raíz
-      html += `
-        <tr class="bg-surface-container-low/30 border-b border-outline-variant/10"
-            data-node-type="section"
-            data-node-id="${rootId}"
-            data-expanded="true"
-            data-expandable="true"
-            data-estado="${totalDiffs > 0 ? STATUS.DIFERENTE : STATUS.IGUAL}">
-          <td class="px-6 py-2 font-bold" colspan="1">
-            <div class="flex items-center gap-2">
-              ${_toggleIcon(true)}
-              <span class="material-symbols-outlined text-xs text-primary">list_alt</span>
-              Parámetros de Entrada
-            </div>
-          </td>
-          <td colspan="3" class="px-6 py-2 text-[10px] text-outline italic">
-            ${paramResults.length} parámetros · ${totalDiffs} diferencia${totalDiffs !== 1 ? 's' : ''}
-          </td>
-        </tr>`;
-
-      // Filas hoja
-      paramResults.forEach(r => {
-        const rowStateClass = `data-${r.status}`;
-        const nodeId = `${compId}-param-${r.name.replace(/[^a-z0-9]/gi, '_')}`;
-        html += `
-          <tr class="hover:bg-surface-container-low transition-colors ${rowStateClass}"
-              data-node-type="field"
-              data-node-id="${nodeId}"
-              data-parent-id="${rootId}"
-              data-estado="${r.status}"
-              data-expandable="false">
-            <td class="px-6 py-1.5 ${_indent(1)} relative">
-              <div class="flex items-center gap-2 tree-connector ml-2">
-                ${_esc(r.name)}
-                <span class="text-[9px] text-outline font-mono ml-1">${_esc(r.typeA || r.typeB)}</span>
-              </div>
-            </td>
-            <td class="px-6 py-1.5">${_valDisplay(r.valA)}</td>
-            <td class="px-6 py-1.5">${_valDisplay(r.valB)}</td>
-            <td class="px-6 py-1.5">${_badge(r.status, tipoComparacion)}</td>
-          </tr>`;
-      });
-
-      return html;
-    }
-
-    // ── Construcción de filas de DataSets ─────────────────────────────────────
-
-    /**
-     * Genera el <tbody> de la tabla de DataSets para un bloque.
-     * Estructura jerárquica: DataSet → Tabla → Registro → Campo
-     */
-    function _buildDatasetRows(dsResults, compId, tipoComparacion) {
-      if (!dsResults.length) {
-        return `<tr><td colspan="4" class="px-6 py-8 text-center text-outline text-xs italic">Sin DataSets para comparar.</td></tr>`;
-      }
-
-      let html = '';
-
-      // Agrupar: dsName → tableName → recordKey → [fields]
-      const grouped = new Map();
-      dsResults.forEach(r => {
-        if (!grouped.has(r.dsName)) grouped.set(r.dsName, new Map());
-        const tblMap = grouped.get(r.dsName);
-        if (!tblMap.has(r.tableName)) tblMap.set(r.tableName, new Map());
-        const recMap = tblMap.get(r.tableName);
-        if (!recMap.has(r.recordKey)) recMap.set(r.recordKey, []);
-        recMap.get(r.recordKey).push(r);
-      });
-
-      grouped.forEach((tblMap, dsName) => {
-        const dsId     = `${compId}-ds-${dsName.replace(/[^a-z0-9]/gi, '_')}`;
-        const dsDiffs  = dsResults.filter(r => r.dsName === dsName && r.status !== STATUS.IGUAL).length;
-        const dsStatus = dsDiffs > 0 ? STATUS.DIFERENTE : STATUS.IGUAL;
-
-        // Nodo DataSet
-        html += `
-          <tr class="bg-surface-container-low/30 border-b border-outline-variant/10"
-              data-node-type="dataset"
-              data-node-id="${dsId}"
-              data-expanded="true"
-              data-expandable="true"
-              data-estado="${dsStatus}">
-            <td class="px-6 py-2 font-bold">
-              <div class="flex items-center gap-2">
-                ${_toggleIcon(true)}
-                <span class="material-symbols-outlined text-xs text-secondary">database</span>
-                ${_esc(dsName)}
-              </div>
-            </td>
-            <td colspan="3" class="px-6 py-2 text-[10px] text-outline italic">
-              ${tblMap.size} tabla${tblMap.size !== 1 ? 's' : ''} · ${dsDiffs} diferencia${dsDiffs !== 1 ? 's' : ''}
-            </td>
-          </tr>`;
-
-        tblMap.forEach((recMap, tblName) => {
-          const tblId    = `${compId}-tbl-${dsName.replace(/[^a-z0-9]/gi, '_')}-${tblName.replace(/[^a-z0-9]/gi, '_')}`;
-          const tblDiffs = [...recMap.values()].flat().filter(r => r.status !== STATUS.IGUAL).length;
-          const tblStatus = tblDiffs > 0 ? STATUS.DIFERENTE : STATUS.IGUAL;
-
-          // Nodo Tabla
-          html += `
-            <tr class="bg-surface-container-low/10 border-t border-outline-variant/5"
-                data-node-type="table"
-                data-node-id="${tblId}"
-                data-parent-id="${dsId}"
-                data-expanded="true"
-                data-expandable="true"
-                data-estado="${tblStatus}">
-              <td class="px-6 py-1.5 ${_indent(1)} font-semibold">
-                <div class="flex items-center gap-2">
-                  ${_toggleIcon(true)}
-                  <span class="material-symbols-outlined text-xs opacity-50">table_rows</span>
-                  ${_esc(tblName)}
-                  <span class="text-[9px] text-outline font-normal">(DataTable)</span>
-                </div>
-              </td>
-              <td colspan="3" class="px-6 text-[10px] text-outline italic">
-                ${recMap.size} registro${recMap.size !== 1 ? 's' : ''} · ${tblDiffs} diferencia${tblDiffs !== 1 ? 's' : ''}
-              </td>
-            </tr>`;
-
-          recMap.forEach((fields, recKey) => {
-            const recId     = `${compId}-rec-${tblId}-${_hashStr(recKey)}`;
-            const recDiffs  = fields.filter(f => f.status !== STATUS.IGUAL).length;
-            const recStatus = recDiffs > 0 ? STATUS.DIFERENTE : STATUS.IGUAL;
-
-            // Nodo Registro
-            html += `
-              <tr data-node-type="record"
-                  data-node-id="${recId}"
-                  data-parent-id="${tblId}"
-                  data-record-key="${_esc(recKey)}"
-                  data-expanded="true"
-                  data-expandable="true"
-                  data-estado="${recStatus}">
-                <td class="px-6 py-1.5 ${_indent(2)} font-medium text-on-surface-variant">
-                  <div class="flex items-center gap-2">
-                    ${_toggleIcon(true)}
-                    <span class="text-[10px] font-mono bg-surface-container px-1.5 py-0.5 rounded">
-                      Row: ${_esc(recKey)}
-                    </span>
-                  </div>
-                </td>
-                <td colspan="3" class="px-6 py-1.5 text-[10px] text-outline italic">
-                  ${fields.length} campo${fields.length !== 1 ? 's' : ''} · ${recDiffs} diferencia${recDiffs !== 1 ? 's' : ''}
-                </td>
-              </tr>`;
-
-            // Ordenar: no-iguales primero
-            const sortedFields = [...fields].sort((a, b) => {
-              if (a.status === STATUS.IGUAL && b.status !== STATUS.IGUAL) return 1;
-              if (a.status !== STATUS.IGUAL && b.status === STATUS.IGUAL) return -1;
-              return 0;
-            });
-
-            sortedFields.forEach(f => {
-              const fieldId = `${recId}-${f.fieldName.replace(/[^a-z0-9]/gi, '_')}`;
-              html += `
-                <tr class="hover:bg-surface-container-low transition-colors data-${f.status}"
-                    data-node-type="field"
-                    data-node-id="${fieldId}"
-                    data-parent-id="${recId}"
-                    data-field-name="${_esc(f.fieldName)}"
-                    data-estado="${f.status}"
-                    data-expandable="false">
-                  <td class="px-6 py-1 ${_indent(3)} text-[11px]">${_esc(f.fieldName)}</td>
-                  <td class="px-6 py-1">${_valDisplay(f.valA)}</td>
-                  <td class="px-6 py-1">${_valDisplay(f.valB)}</td>
-                  <td class="px-6 py-1">${_badge(f.status, tipoComparacion)}</td>
-                </tr>`;
-            });
-          });
-        });
-      });
-
-      return html;
-    }
-
-    /** Hash simple para generar IDs únicos desde el recordKey */
-    function _hashStr(str) {
-      let h = 0;
-      for (let i = 0; i < str.length; i++) {
-        h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
-      }
-      return Math.abs(h).toString(36);
-    }
-
-    // ── Render de un bloque de comparación ────────────────────────────────────
-
-    /**
-     * Instancia el template #tmplComparacionBlock y lo rellena con los datos
-     * de la ComparisonUnit. Devuelve el elemento jQuery listo para insertar.
-     */
-    function renderBlock(unit) {
-      const tmpl     = document.getElementById('tmplComparacionBlock');
-      const $block   = $(tmpl.content.cloneNode(true)).find('section');
-      const compId   = unit.id;
-      const seqNum   = unit.seqNum;
-      const scope    = unit.config.tipoDato;
-
-      // Atributos del bloque contenedor
-      $block
-        .attr('data-comparacion-id',   compId)
-        .attr('data-tipo-comparacion', unit.config.tipoComparacion)
-        .attr('data-scope',            scope)
-        .attr('data-metodo-a',         unit.config.metodoA)
-        .attr('data-metodo-b',         unit.config.metodoB);
-
-      // Badge y contexto
-      $block.find('.comparacion-badge').text(`C${seqNum}`);
-      $block.find('.comparacion-contexto').text(unit.contextLabel);
-
-      // Etiqueta tipo análisis
-      const tipoLabel = unit.config.tipoComparacion === 'input-vs-output'
-        ? 'Input A → Output A'
-        : 'Output A → Input B';
-      $block.find('.comparacion-tipo-label').text(tipoLabel);
-
-      // Botón exportar por bloque
-      $block.find('.btnExportarBloque').attr('data-comparacion-id', compId);
-
-      // Sincronizar data-comparacion-id en filtros
-      $block.find('.filtro-estado').attr('data-comparacion-id', compId);
-
-      // Visibilidad de secciones según scope
-      const showParams   = scope === 'parametros' || scope === 'ambos';
-      const showDatasets = scope === 'datasets'   || scope === 'ambos';
-      $block.find('.comparacion-seccion-parametros').toggle(showParams);
-      $block.find('.comparacion-seccion-datasets').toggle(showDatasets);
-
-      // Rellenar tbodies — FIX 6: pasar tipoComparacion para badges semánticos
-      if (showParams) {
-        $block.find('.tbodyParametros').html(
-          _buildParamRows(unit.results.paramResults, compId, unit.config.tipoComparacion)
-        );
-      }
-      if (showDatasets) {
-        $block.find('.tbodyDatasets').html(
-          _buildDatasetRows(unit.results.dsResults, compId, unit.config.tipoComparacion)
-        );
-      }
-
-      // Estadísticas del footer
-      const totalNodes = unit.results.paramResults.length + unit.results.dsResults.length;
-      const totalDiffs = [...unit.results.paramResults, ...unit.results.dsResults]
-        .filter(r => r.status !== STATUS.IGUAL).length;
-      $block.find('.comparacion-stats').text(
-        `Nodos Analizados: ${totalNodes} | Diferencias: ${totalDiffs}`
-      );
-
-      return $block;
-    }
-
-    /** Actualiza el estado "vacío" del contenedor principal */
-    function showEmptyState(show) {
-      const $empty = $('#emptyState');
-      if ($empty.length) $empty.toggle(show);
-    }
-
-    return { renderBlock, showEmptyState };
-  })();
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // ESTADO DE LA APLICACIÓN
-  // ════════════════════════════════════════════════════════════════════════════
-
-  let _executions = []; // Lista de TraceExecution (resultado del parser)
-  let _currentFile = null;
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // CARGA DE ARCHIVO
-  // ════════════════════════════════════════════════════════════════════════════
-
-  // Click en dropZone → abre fileInput
-  // IMPORTANTE: usar .click() nativo para evitar que jQuery propague el evento
-  // de vuelta al dropZone (que lo dispararía infinitamente).
-  $('#dropZone').on('click', function (e) {
-    // Si el click viene del propio input (burbujeo), ignorar
-    if ($(e.target).is('#fileInput') || $(e.target).closest('#fileInput').length) return;
-    document.getElementById('fileInput').click(); // nativo, sin bubbling jQuery
-  });
-
-  // Selección por input file — stopPropagation para no llegar al dropZone
-  $('#fileInput').on('click', function (e) {
-    e.stopPropagation();
-  });
-  $('#fileInput').on('change', function () {
-    if (this.files[0]) _setFile(this.files[0]);
-  });
-
-
-  // Drag & Drop
-  $('#dropZone')
-    .on('dragover', function (e) {
-      e.preventDefault();
-      $(this).addClass('bg-surface-container-low border-secondary');
-    })
-    .on('dragleave', function () {
-      $(this).removeClass('bg-surface-container-low border-secondary');
-    })
-    .on('drop', function (e) {
-      e.preventDefault();
-      $(this).removeClass('bg-surface-container-low border-secondary');
-      const f = e.originalEvent.dataTransfer.files[0];
-      if (f) _setFile(f);
-    });
-
-  function _setFile(file) {
-    _currentFile = file;
-    $('#fileName').text(file.name);
-  }
-
-  // Quitar archivo
-  $('#btnRemoveFile').on('click', function () {
-    _currentFile = null;
-    $('#fileName').text('Sin archivo');
-    $('#fileInput').val('');
-    _executions = [];
-    _resetSelectors();
-  });
-
-  // Cargar y parsear el XML
-  $('#btnCargarXml').on('click', function () {
-    if (!_currentFile) { alert('Por favor seleccione un archivo primero.'); return; }
-    const reader = new FileReader();
-    reader.onload = function (e) {
-      try {
-        _executions = TraceParser.parse(e.target.result);
-        _populateSelectors(_executions);
-        _showToast(`✓ ${_executions.length} métodos cargados correctamente.`, 'success');
-      } catch (err) {
-        alert('Error al procesar el archivo:\n' + err.message);
-        console.error(err);
-      }
-    };
-    reader.onerror = () => alert('No se pudo leer el archivo. Intente de nuevo.');
-    reader.readAsText(_currentFile, 'UTF-8');
-  });
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // SELECTORES (Business Object y Método)
-  // ════════════════════════════════════════════════════════════════════════════
-
-  function _resetSelectors() {
-    ['#selectBusinessObjectA', '#selectBusinessObjectB'].forEach(sel => {
-      $(sel).empty().append('<option value="">— Cargue un archivo —</option>');
-    });
-    ['#selectMetodoA', '#selectMetodoB'].forEach(sel => {
-      $(sel).empty().append('<option value="">— Seleccione Fuente —</option>');
-    });
-  }
-
-  function _populateSelectors(executions) {
-    const bos = TraceParser.getBusinessObjects(executions);
-
-    ['#selectBusinessObjectA', '#selectBusinessObjectB'].forEach(sel => {
-      const $sel = $(sel).empty();
-      $sel.append('<option value="">— Seleccione BO —</option>');
-      bos.forEach(bo => $sel.append($('<option>', { value: bo, text: bo })));
-      if (bos.length === 1) $sel.val(bos[0]).trigger('change');
-    });
-  }
-
-  function _populateMethodSelector(selectorId, businessObject) {
-    const $sel = $(selectorId).empty();
-    $sel.append('<option value="">— Seleccione Método —</option>');
-
-    const filtered = _executions.filter(e =>
-      !businessObject || e.businessObject === businessObject
-    );
-    filtered.forEach(e => {
-      $sel.append($('<option>', { value: e.label, text: `[${e.globalIndex}] ${e.label}` }));
-    });
-  }
-
-  // Cambio en BO A → poblar Métodos A
-  $('#selectBusinessObjectA').on('change', function () {
-    _populateMethodSelector('#selectMetodoA', $(this).val());
-  });
-
-  // Cambio en BO B → poblar Métodos B
-  $('#selectBusinessObjectB').on('change', function () {
-    _populateMethodSelector('#selectMetodoB', $(this).val());
-  });
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // AGREGAR COMPARACIÓN (#btnAgregarComparacion)
-  // ════════════════════════════════════════════════════════════════════════════
-
-  $('#btnAgregarComparacion').on('click', function () {
-    // 1. Validaciones previas
-    if (!_executions.length) {
-      alert('Primero cargue un archivo XML.'); return;
-    }
-
-    const labelA = $('#selectMetodoA').val();
-    const labelB = $('#selectMetodoB').val();
-    const tipo   = $('#tipoComparacion').val();
-    const scope  = $('#tipoDatoComparado').val();
-
-    if (!labelA) { alert('Seleccione el Método A.'); return; }
-    if (tipo === 'output-vs-input' && !labelB) {
-      alert('Seleccione el Método B.'); return;
-    }
-
-    const execA = _executions.find(e => e.label === labelA);
-    if (!execA) { alert('No se encontró el Método A.'); return; }
-
-    // 2. Determinar qué datos comparar
-    let dataA, dataB, contextLabel;
-
-    if (tipo === 'input-vs-output') {
-      // FIX 3: Validar que el método A tenga output antes de continuar.
-      // Si returnType es void o no tiene returnValues, avisar al usuario.
-      const outputParams  = execA.output.parameters.size;
-      const outputDatasets = execA.output.datasets.size;
-      if (outputParams === 0 && outputDatasets === 0) {
-        const proceed = confirm(
-          `El método "${execA.label}" no tiene valores de retorno (puede ser void).\n` +
-          `La comparación mostrará todos los campos de Input como SOLO EN INPUT.\n\n` +
-          `¿Desea continuar de todas formas?`
-        );
-        if (!proceed) return;
-      }
-      dataA        = execA.input;
-      dataB        = execA.output;
-      contextLabel = `Input ${execA.label} vs Output ${execA.label}`;
-    } else {
-      // output-vs-input
-      const execB = _executions.find(e => e.label === labelB);
-      if (!execB) { alert('No se encontró el Método B.'); return; }
-      dataA        = execA.output;
-      dataB        = execB.input;
-      contextLabel = `Output ${execA.label} vs Input ${execB.label}`;
-    }
-
-    // 3. Ejecutar comparación
-    const results = ComparisonEngine.run(dataA, dataB, scope);
-
-    // 4. Guardar en el store
-    // FIX 4: metodoB solo se guarda cuando aplica (output-vs-input).
-    // En input-vs-output, metodoB = null para no contaminar el CSV.
-    const unit = ComparisonStore.add({
-      id:           `comp_${Date.now()}`,
-      config:       {
-        metodoA:         labelA,
-        metodoB:         tipo === 'output-vs-input' ? labelB : null,
-        tipoComparacion: tipo,
-        tipoDato:        scope,
-      },
-      contextLabel: contextLabel,
-      rawDataA:     dataA,
-      rawDataB:     dataB,
-      results:      results,
-    });
-
-    // 5. Renderizar bloque y añadir al contenedor (SIN borrar anteriores)
-    const $block = UIRenderer.renderBlock(unit);
-    $('#comparisonsContainer').append($block);
-
-    // Ocultar estado vacío si es la primera comparación
-    _toggleEmptyState(false);
-
-    // Scroll suave al nuevo bloque
-    $('html, body').animate({ scrollTop: $block.offset().top - 80 }, 400);
-
-    _showToast(`Comparación C${unit.seqNum} agregada.`, 'success');
-  });
-
-  // #btnComparar = alias del botón "Ejecutar Análisis" (también agrega)
-  $('#btnComparar').on('click', function () {
-    $('#btnAgregarComparacion').trigger('click');
-  });
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // INTERACTIVIDAD: Expand/Collapse (delegación de eventos)
-  // ════════════════════════════════════════════════════════════════════════════
-
-  $('#comparisonsContainer').on('click', '[data-expandable="true"]', function (e) {
-    // Evitar que el clic en un select hijo active esto
-    if ($(e.target).is('select') || $(e.target).closest('select').length) return;
-
-    const $row    = $(this);
-    const nodeId  = $row.attr('data-node-id');
-    const isOpen  = $row.attr('data-expanded') === 'true';
-
-    $row.attr('data-expanded', isOpen ? 'false' : 'true');
-
-    // Cambiar ícono
-    $row.find('.toggle-icon').first().text(isOpen ? 'chevron_right' : 'expand_more');
-
-    // Mostrar/ocultar todos los descendientes
-    _toggleDescendants(nodeId, !isOpen, $row.closest('table'));
-  });
-
-  /**
-   * Muestra u oculta recursivamente todos los nodos cuyo data-parent-id
-   * pertenece al subárbol del nodo dado.
-   */
-  function _toggleDescendants(parentId, show, $table) {
-    $table.find(`[data-parent-id="${parentId}"]`).each(function () {
-      const $child  = $(this);
-      const childId = $child.attr('data-node-id');
-
-      $child.toggle(show);
-
-      // Si estamos mostrando, respetar el estado de expansión del hijo
-      if (show) {
-        const childExpanded = $child.attr('data-expanded');
-        // Si el hijo está colapsado, sus descendientes deben permanecer ocultos
-        const propagate = childExpanded !== 'false';
-        if (childId) _toggleDescendants(childId, propagate, $table);
-      } else {
-        // Ocultar todo el subárbol
-        if (childId) _toggleDescendants(childId, false, $table);
-      }
-    });
-  }
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // INTERACTIVIDAD: Colapsar/Expandir Bloque Completo
-  // ════════════════════════════════════════════════════════════════════════════
-
-  $('#comparisonsContainer').on('click', '.btnColapsarBloque', function () {
-    const $btn  = $(this);
-    const $body = $btn.closest('.comparacion-block').find('.comparacion-body');
-    const $icon = $btn.find('.material-symbols-outlined');
-
-    $body.slideToggle(200);
-    $icon.text($body.is(':visible') ? 'expand_less' : 'expand_more');
-  });
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // FILTROS POR ESTADO (por sección y por bloque)
-  // ════════════════════════════════════════════════════════════════════════════
-
-  $('#comparisonsContainer').on('change', '.filtro-estado', function () {
-    const $sel      = $(this);
-    const compId    = $sel.attr('data-comparacion-id');
-    const seccion   = $sel.attr('data-seccion'); // 'parametros' | 'datasets'
-    const filterVal = $sel.val(); // 'todos' | 'igual' | 'diferente' | 'solo-a' | 'solo-b'
-
-    // Buscar el bloque correspondiente
-    const $block  = $(`[data-comparacion-id="${compId}"]`);
-    const $tbody  = seccion === 'parametros'
-      ? $block.find('.tbodyParametros')
-      : $block.find('.tbodyDatasets');
-
-    // Paso 1: Mostrar/ocultar filas hoja (field)
-    $tbody.find('[data-node-type="field"]').each(function () {
-      const $row   = $(this);
-      const estado = $row.attr('data-estado');
-      if (filterVal === 'todos' || estado === filterVal) {
-        $row.show();
-      } else {
-        $row.hide();
-      }
-    });
-
-    // FIX 5: Tras filtrar fields, ocultar nodos padre (record, table, dataset, section)
-    // que no tengan ningún hijo visible. Se recorre de dentro hacia afuera.
-    const parentTypes = ['record', 'table', 'dataset', 'section'];
-    parentTypes.forEach(function (nodeType) {
-      $tbody.find(`[data-node-type="${nodeType}"]`).each(function () {
-        const $parentRow = $(this);
-        const nodeId     = $parentRow.attr('data-node-id');
-        // Buscar hijos directos (data-parent-id apunta a este nodo)
-        const $children  = $tbody.find(`[data-parent-id="${nodeId}"]`);
-        // Si todos los hijos están ocultos → ocultar el padre también
-        const hasVisible = $children.filter(':visible').length > 0;
-        $parentRow.toggle(hasVisible);
-      });
-    });
-  });
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // EXPORTAR EXCEL (CSV) — por bloque y global
-  // ════════════════════════════════════════════════════════════════════════════
-
-  $('#comparisonsContainer').on('click', '.btnExportarBloque', function () {
-    const compId = $(this).attr('data-comparacion-id');
-    const unit   = ComparisonStore.getById(compId);
-    if (!unit) return;
-    _exportUnit(unit);
-  });
-
-  $('#btnExportarExcel').on('click', function () {
-    const all = ComparisonStore.getAll();
-    if (!all.length) { alert('No hay comparaciones para exportar.'); return; }
-    all.forEach(u => _exportUnit(u));
-  });
-
-  function _exportUnit(unit) {
-    const BOM     = '\uFEFF';
-    const headers = ['Comparacion', 'Categoria', 'Ruta', 'Campo', 'ValorA', 'ValorB', 'Estado'];
-
-    const rows = [
-      ...unit.results.paramResults.map(r => [
-        unit.contextLabel, 'Parámetros', r.path, r.name,
-        _csvCell(r.valA), _csvCell(r.valB), r.status,
-      ]),
-      ...unit.results.dsResults.map(r => [
-        unit.contextLabel, 'DataSets',
-        `${r.dsName}.${r.tableName}[${r.recordKey}]`,
-        r.fieldName,
-        _csvCell(r.valA), _csvCell(r.valB), r.status,
-      ]),
-    ];
-
-    const csv  = BOM + [headers, ...rows].map(r => r.map(_csvCell).join(',')).join('\r\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url  = URL.createObjectURL(blob);
-    const $a   = $('<a>', { href: url, download: `comparacion_${unit.seqNum}_${Date.now()}.csv` }).appendTo('body');
-    $a[0].click();
-    $a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
-
-  function _csvCell(val) {
-    const str = String(val === null || val === undefined ? '' : val);
-    return (str.includes(',') || str.includes('"') || str.includes('\n'))
-      ? `"${str.replace(/"/g, '""')}"` : str;
-  }
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // LIMPIAR TODO
-  // ════════════════════════════════════════════════════════════════════════════
-
-  $('#btnLimpiar').on('click', function () {
-    ComparisonStore.clear();
-    // Eliminar todos los bloques pero mantener el #emptyState si existe
-    $('#comparisonsContainer .comparacion-block').remove();
-    _toggleEmptyState(true);
-    _showToast('Comparaciones eliminadas.', 'info');
-  });
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // UTILIDAD: Toast de notificación
-  // ════════════════════════════════════════════════════════════════════════════
-
-  /** Muestra/Oculta el mensaje de "No hay comparaciones" */
-  function _toggleEmptyState(show) {
-    const $empty = $('#emptyState');
-    if ($empty.length) $empty.toggle(show);
-  }
-
-  function _showToast(msg, type) {
-    const colors = {
-      success: 'bg-green-600',
-      info:    'bg-primary',
-      warn:    'bg-amber-500',
-      error:   'bg-red-600',
-    };
-    const $toast = $(`
-      <div class="fixed bottom-6 right-6 z-50 px-4 py-3 rounded-lg shadow-xl text-white text-xs font-bold flex items-center gap-2 ${colors[type] || colors.info}">
-        ${_escToast(msg)}
-      </div>`).appendTo('body');
-    setTimeout(() => $toast.fadeOut(300, () => $toast.remove()), 2800);
-  }
-
-  function _escToast(str) {
-    if (!str) return '';
-    return String(str).replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  }
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // ESTADO INICIAL
-  // ════════════════════════════════════════════════════════════════════════════
-
-  _resetSelectors();
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // FIX 2: Control de visibilidad de selectores B según tipo de comparación.
-  // Cuando el usuario elige "input-vs-output", Fuente B y Método B se deshabilitan
-  // visualmente porque no aplican. Solo se activan en "output-vs-input".
-  // ════════════════════════════════════════════════════════════════════════════
-
-  function _syncSelectorBVisibility() {
-    const tipo = $('#tipoComparacion').val();
-    const needsB = tipo === 'output-vs-input';
-
-    // Selectores de Fuente B y Método B
-    const $srcB    = $('#selectBusinessObjectB');
-    const $metB    = $('#selectMetodoB');
-
-    // Deshabilitar / habilitar campos
-    $srcB.prop('disabled', !needsB);
-    $metB.prop('disabled', !needsB);
-
-    // Opacidad visual para indicar estado
-    [$srcB, $metB].forEach($el => {
-      $el.closest('div, label').toggleClass('opacity-40 pointer-events-none', !needsB);
-    });
-
-    // Si se desactiva B, limpiar selección para evitar que un valor anterior
-    // quede "seleccionado" silenciosamente y contamine la comparación.
-    if (!needsB) {
-      $srcB.val('');
-      $metB.empty().append('<option value="">— No aplica —</option>');
-    }
-  }
-
-  // Ejecutar al cambiar tipo de comparación
-  $('#tipoComparacion').on('change', _syncSelectorBVisibility);
-
-  // Ejecutar al inicio para setear el estado correcto según el valor por defecto del select
-  _syncSelectorBVisibility();
-
-}); // end $(function)
+});

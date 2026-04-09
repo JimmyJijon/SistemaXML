@@ -71,20 +71,21 @@
       font-weight: 600;
     }
 
-    .data-solo-a {
+    /* FIX 3: Renombrado SOLO_A→SOBRANTE, SOLO_B→FALTANTE */
+    .data-sobrante {
       background-color: #fef3c7;
     }
 
-    .data-solo-a td {
+    .data-sobrante td {
       color: #b45309;
     }
 
-    .data-solo-b {
-      background-color: #ecfeff;
+    .data-faltante {
+      background-color: #fff1f2;
     }
 
-    .data-solo-b td {
-      color: #0891b2;
+    .data-faltante td {
+      color: #be185d;
     }
 
     /* ── Nodos colapsados ── */
@@ -350,7 +351,13 @@
           <button class="btnExportarBloque flex items-center gap-1 text-[10px] font-bold text-primary hover:underline"
             data-comparacion-id="">
             <span class="material-symbols-outlined text-sm">download</span>
-            EXPORTAR EXCEL
+            EXPORTAR
+          </button>
+          <!-- FIX 5: Botón eliminar comparación individual -->
+          <button class="btnEliminarBloque flex items-center gap-1 text-[10px] font-bold text-rose-600 hover:underline"
+            data-comparacion-id="" title="Eliminar esta comparación">
+            <span class="material-symbols-outlined text-sm">delete</span>
+            ELIMINAR
           </button>
           <button class="btnColapsarBloque text-on-surface-variant" title="Colapsar/Expandir">
             <span class="material-symbols-outlined">expand_more</span>
@@ -381,8 +388,8 @@
                         <option value="todos">▾ Todos</option>
                         <option value="igual">Igual</option>
                         <option value="diferente">Diferente</option>
-                        <option value="solo-a">Solo en A</option>
-                        <option value="solo-b">Solo en B</option>
+                        <option value="sobrante">Sobrante</option>
+                        <option value="faltante">Faltante</option>
                       </select>
                     </div>
                   </th>
@@ -415,8 +422,8 @@
                         <option value="todos">▾ Todos</option>
                         <option value="igual">Igual</option>
                         <option value="diferente">Diferente</option>
-                        <option value="solo-a">Solo en A</option>
-                        <option value="solo-b">Solo en B</option>
+                        <option value="sobrante">Sobrante</option>
+                        <option value="faltante">Faltante</option>
                       </select>
                     </div>
                   </th>
@@ -442,11 +449,11 @@
             </span>
             <span class="flex items-center gap-1">
               <div class="w-2 h-2 rounded-full bg-amber-500"></div>
-              Solo en A
+              Sobrante
             </span>
             <span class="flex items-center gap-1">
-              <div class="w-2 h-2 rounded-full bg-cyan-500"></div>
-              Solo en B
+              <div class="w-2 h-2 rounded-full bg-rose-500"></div>
+              Faltante
             </span>
           </span>
         </div>
