@@ -553,9 +553,9 @@ $(function () {
             let labelPrefA = item.tipo === 'input-vs-output' ? 'Input A' : 'Output A';
             let labelPrefB = item.tipo === 'input-vs-output' ? 'Output A' : 'Input B';
 
-            let rootLabel = '';
-            if (dsNameA) rootLabel += `${labelPrefA}: ${dsNameA}`;
-            if (dsNameB) rootLabel += (rootLabel ? ' | ' : '') + `${labelPrefB}: ${dsNameB}`;
+            const dsA = dsNameA || 'Vacío';
+            const dsB = dsNameB || 'Vacío';
+            let rootLabel = `${labelPrefA}: ${dsA} | ${labelPrefB}: ${dsB}`;
 
             const tableIdClass = `trows-${tname.replace(/[^a-zA-Z0-9]/g, '')}-${Math.random().toString(36).substr(2, 5)}`;
             tbodyD.append(`
