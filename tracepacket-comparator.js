@@ -490,6 +490,17 @@ $(function () {
       _renderTablas(item);
     });
 
+    // Global Expand/Collapse
+    $('#btnExpandAll').on('click', function () {
+      $('.comparacion-body, .comparacion-subseccion-body').slideDown();
+      $('.btnColapsarBloque span, .toggle-icon').text('expand_less');
+    });
+
+    $('#btnCollapseAll').on('click', function () {
+      $('.comparacion-body, .comparacion-subseccion-body').slideUp();
+      $('.btnColapsarBloque span, .toggle-icon').text('expand_more');
+    });
+
     function _renderTablas(item) {
       const tmpl = $('#tmplComparacionBlock')[0].content.cloneNode(true);
       const $b = $(tmpl).find('.comparacion-block');
@@ -519,7 +530,6 @@ $(function () {
       }
 
       if (item.scope !== 'parametros') {
-        // Agrupar filas para ordenar el display visualmente 
         const tbm = new Map();
         item.resultados.datasets.forEach(r => {
           if (!tbm.has(r.tblName)) tbm.set(r.tblName, new Map());
@@ -531,32 +541,51 @@ $(function () {
           tbodyD.append('<tr><td colspan="4" class="text-center p-4 text-xs italic text-gray-400">Sin DataSets encontrados.</td></tr>');
         } else {
           tbm.forEach((filas, tname) => {
-            // Header: Fila de Tabla
-            let rootLabel = '';
-            const testField = filas.values().next().value?.[0]; // Inspeccionar una celda de sample
-            if (testField && testField.dsNameA) rootLabel += `A: ${testField.dsNameA}`;
-            if (testField && testField.dsNameB) rootLabel += (rootLabel ? ' | ' : '') + `B: ${testField.dsNameB}`;
+            let dsNameA = null, dsNameB = null;
+            // Buscar nombres de DataSet en todos los registros para evitar inconsistencias
+            for (const records of filas.values()) {
+              const f = records[0];
+              if (f.dsNameA) dsNameA = f.dsNameA;
+              if (f.dsNameB) dsNameB = f.dsNameB;
+              if (dsNameA && dsNameB) break;
+            }
 
+            let labelPrefA = item.tipo === 'input-vs-output' ? 'Input A' : 'Output A';
+            let labelPrefB = item.tipo === 'input-vs-output' ? 'Output A' : 'Input B';
+
+            let rootLabel = '';
+            if (dsNameA) rootLabel += `${labelPrefA}: ${dsNameA}`;
+            if (dsNameB) rootLabel += (rootLabel ? ' | ' : '') + `${labelPrefB}: ${dsNameB}`;
+
+            const tableIdClass = `trows-${tname.replace(/[^a-zA-Z0-9]/g, '')}-${Math.random().toString(36).substr(2, 5)}`;
             tbodyD.append(`
-              <tr class="bg-surface-container-low font-bold border-b border-outline-variant/10" data-table="${tname}">
-                <td colspan="4" class="px-6 py-2 text-on-surface font-mono text-xs flex gap-2 items-center">
-                  <span class="material-symbols-outlined text-[14px]">table_rows</span> ${tname} 
-                  <span class="text-[9px] font-normal text-gray-500">(${rootLabel || 'N/A'})</span>
+              <tr class="bg-surface-container-low border-b border-outline-variant/30 cursor-pointer hover:bg-surface-container transition-colors btnToggleTabla" data-target="${tableIdClass}">
+                <td colspan="4" class="px-6 pt-5 pb-3 text-on-surface">
+                  <div class="flex flex-col gap-4">
+                    <div class="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                      <span class="material-symbols-outlined text-[14px]">database</span> DataSet: (${rootLabel || 'N/A'})
+                    </div>
+                    <div class="flex items-center justify-between">
+                      <div class="flex items-center gap-2 text-[14px] font-bold text-primary">
+                        <span class="material-symbols-outlined text-[18px] text-secondary">table_chart</span> Tabla: ${tname}
+                      </div>
+                      <div class="flex items-center gap-3">
+                        <select class="filtro-estado-tabla bg-white text-[#334155] border border-[#cbd5e1] rounded pl-2 pr-6 py-0.5 text-[10px] font-bold uppercase cursor-pointer hover:border-secondary outline-none focus:ring-1 focus:ring-secondary/30 transition-colors" data-target="${tableIdClass}">
+                          <option value="todos">Todos los estados</option>
+                          <option value="igual">Igual</option>
+                          <option value="diferente">Diferente</option>
+                          <option value="sobrante">Sobrante</option>
+                          <option value="faltante">Faltante</option>
+                        </select>
+                        <span class="material-symbols-outlined text-sm text-primary/50 toggle-icon">expand_more</span>
+                      </div>
+                    </div>
+                  </div>
                 </td>
               </tr>
             `);
 
             filas.forEach((campos, rkey) => {
-              // Sub Header: Fila Identificadora de Row
-              tbodyD.append(`
-                <tr class="bg-surface-container-low/40 border-b border-outline-variant/10 text-xs text-on-surface" data-record="${rkey}">
-                  <td colspan="4" class="px-6 py-1.5 pl-10 font-bold flex gap-2 items-center">
-                     <span class="material-symbols-outlined text-[12px]">dataset</span> ID Registro: ${rkey}
-                  </td>
-                </tr>
-              `);
-
-              // Ordenar celdas priorizando diferentes arriba
               const sorteados = campos.sort((a, b) => {
                 const s1 = a.status === STATUS.IGUAL ? 1 : 0;
                 const s2 = b.status === STATUS.IGUAL ? 1 : 0;
@@ -564,9 +593,12 @@ $(function () {
               });
 
               sorteados.forEach(c => {
+                // Filtro de campos técnicos de Epicor
+                if (['SysRowID', 'RowMod', 'SysRevID'].includes(c.fieldName)) return;
+
                 tbodyD.append(`
-                  <tr class="border-b border-outline-variant/10 hover:bg-surface-container-low transition-colors data-${c.status}" data-estado="${c.status}">
-                    <td class="px-6 py-1.5 pl-[72px] text-[11px] font-mono">${_escapar(c.fieldName)}</td>
+                  <tr class="border-b border-outline-variant/10 hover:bg-surface-container-low transition-colors data-${c.status} ${tableIdClass}" data-estado="${c.status}" style="display:none;">
+                    <td class="px-6 py-1.5 pl-10 text-[11px] font-mono font-medium">${_escapar(c.fieldName)}</td>
                     <td class="px-6 py-1.5 w-1/4 break-words">${_formatoValor(c.valA)}</td>
                     <td class="px-6 py-1.5 w-1/4 break-words">${_formatoValor(c.valB)}</td>
                     <td class="px-6 py-1.5">${_badge(c.status)}</td>
@@ -590,33 +622,83 @@ $(function () {
       });
 
       $b.find('.btnColapsarBloque').on('click', function () {
-        $b.find('.comparacion-body').slideToggle();
-        const $i = $(this).find('span');
-        $i.text($i.text().includes('expand_more') ? 'expand_less' : 'expand_more');
+        const body = $b.find('.comparacion-body');
+        const isHidden = body.is(':hidden');
+        body.slideToggle();
+        $(this).find('span').text(isHidden ? 'expand_less' : 'expand_more');
+      });
+
+      $b.find('.btnToggleSubSeccion').on('click', function () {
+        const subBody = $(this).next('.comparacion-subseccion-body');
+        const isHidden = subBody.is(':hidden');
+        subBody.slideToggle();
+        $(this).find('.toggle-icon').text(isHidden ? 'expand_less' : 'expand_more');
+      });
+
+      // Detener propagación para que el click en el select no cierre el acordeón
+      $b.find('.filtro-estado').on('click', function (e) {
+        e.stopPropagation();
+      });
+
+      $b.find('.btnToggleTabla').on('click', function () {
+        const tgt = $(this).attr('data-target');
+        const rows = $b.find(`.${tgt}`);
+        const isHidden = rows.first().is(':hidden');
+        
+        if (isHidden) {
+          rows.fadeIn(250);
+          $(this).find('.toggle-icon').text('expand_less');
+        } else {
+          rows.fadeOut(200);
+          $(this).find('.toggle-icon').text('expand_more');
+        }
       });
 
       $b.find('.btnExportarBloque').on('click', () => _exportarCSV(item));
 
-      // Filtro local en Acordeon 
+      // Detener propagación para el filtro local de tabla
+      $b.find('.filtro-estado-tabla').on('click', function (e) {
+        e.stopPropagation();
+      });
+
+      // Filtro Local
+      $b.find('.filtro-estado-tabla').on('change', function () {
+        const val = $(this).val();
+        const tgtClass = $(this).attr('data-target');
+        
+        $b.find('.' + tgtClass).each(function () {
+          const isMatch = (val === 'todos' || $(this).attr('data-estado') === val);
+          $(this).toggleClass('filtered-out', !isMatch);
+        });
+      });
+
+      // Filtro Global
       $b.find('.filtro-estado').on('change', function () {
         const val = $(this).val();
         const sec = $(this).attr('data-seccion');
         const tb = sec === 'parametros' ? tbodyP : tbodyD;
 
+        if (sec === 'datasets') {
+           // Reseteo forzado de selectores locales
+           $b.find('.filtro-estado-tabla').val('todos');
+        }
+
         // Hide/Show celdas
         tb.find('tr[data-estado]').each(function () {
-          $(this).toggle(val === 'todos' || $(this).data('estado') === val);
+          const isMatch = (val === 'todos' || $(this).data('estado') === val);
+          $(this).toggleClass('filtered-out', !isMatch);
         });
 
-        // Hide/Show agrupadores para no dejar tables colgadas sin rows child
+        // Hide/Show agrupadores para no dejar tables vacías visualmente
         if (sec === 'datasets') {
           tb.find('tr[data-record]').each(function () {
-            const vis = $(this).nextUntil('tr[data-record], tr[data-table]').filter(':visible').length > 0;
-            $(this).toggle(vis);
+            const vis = $(this).nextUntil('tr[data-record], tr[data-target]').filter(':not(.filtered-out)').length > 0;
+            $(this).toggleClass('filtered-out', !vis);
           });
-          tb.find('tr[data-table]').each(function () {
-            const vis = $(this).nextUntil('tr[data-table]').filter(':visible').length > 0;
-            $(this).toggle(vis);
+          tb.find('.btnToggleTabla').each(function () {
+            const tgt = $(this).attr('data-target');
+            const hasVisibleRows = tb.find('.' + tgt + ':not(.filtered-out)').length > 0;
+            $(this).toggleClass('filtered-out', !hasVisibleRows);
           });
         }
       });

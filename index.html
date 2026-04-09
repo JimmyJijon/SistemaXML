@@ -101,6 +101,11 @@
     [data-expandable="true"]:hover td:first-child {
       text-decoration: underline;
     }
+
+    /* ── Ocultamiento imperativo para filtros sin dañar colapsos nativos ── */
+    .filtered-out {
+      display: none !important;
+    }
   </style>
   <script id="tailwind-config">
     tailwind.config = {
@@ -209,7 +214,7 @@
                 Fuente A (BusinessObject)
               </label>
               <select id="selectBusinessObjectA"
-                class="w-full bg-surface-container-low border-0 ring-1 ring-outline-variant/30 rounded py-2 px-3 text-xs font-medium focus:ring-2 focus:ring-primary">
+                class="w-full bg-[#f8fafc] text-[#334155] border border-[#cbd5e1] rounded-lg py-2.5 px-3 text-xs font-semibold shadow-sm focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all appearance-none cursor-pointer">
                 <option value="">— Cargue un archivo —</option>
               </select>
             </div>
@@ -220,7 +225,7 @@
                 Fuente B (BusinessObject)
               </label>
               <select id="selectBusinessObjectB"
-                class="w-full bg-surface-container-low border-0 ring-1 ring-outline-variant/30 rounded py-2 px-3 text-xs font-medium focus:ring-2 focus:ring-primary">
+                class="w-full bg-[#f8fafc] text-[#334155] border border-[#cbd5e1] rounded-lg py-2.5 px-3 text-xs font-semibold shadow-sm focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all appearance-none cursor-pointer">
                 <option value="">— Cargue un archivo —</option>
               </select>
             </div>
@@ -231,7 +236,7 @@
                 Método A (Timeline)
               </label>
               <select id="selectMetodoA"
-                class="w-full bg-surface-container-low border-0 ring-1 ring-outline-variant/30 rounded py-2 px-3 text-xs font-medium focus:ring-2 focus:ring-primary">
+                class="w-full bg-[#f8fafc] text-[#334155] border border-[#cbd5e1] rounded-lg py-2.5 px-3 text-xs font-semibold shadow-sm focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all appearance-none cursor-pointer">
                 <option value="">— Seleccione Fuente A —</option>
               </select>
             </div>
@@ -242,7 +247,7 @@
                 Método B (Timeline)
               </label>
               <select id="selectMetodoB"
-                class="w-full bg-surface-container-low border-0 ring-1 ring-outline-variant/30 rounded py-2 px-3 text-xs font-medium focus:ring-2 focus:ring-primary">
+                class="w-full bg-[#f8fafc] text-[#334155] border border-[#cbd5e1] rounded-lg py-2.5 px-3 text-xs font-semibold shadow-sm focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all appearance-none cursor-pointer">
                 <option value="">— Seleccione Fuente B —</option>
               </select>
             </div>
@@ -256,7 +261,7 @@
                 Tipo de Análisis
               </label>
               <select id="tipoComparacion"
-                class="w-full bg-surface-container-low border-0 ring-1 ring-outline-variant/30 rounded py-2 px-3 text-xs font-medium focus:ring-2 focus:ring-primary">
+                class="w-full bg-[#f8fafc] text-[#334155] border border-[#cbd5e1] rounded-lg py-2.5 px-3 text-xs font-semibold shadow-sm focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all appearance-none cursor-pointer">
                 <option value="input-vs-output">Input A vs Output A</option>
                 <option value="output-vs-input">Output A vs Input B</option>
               </select>
@@ -268,7 +273,7 @@
                 Alcance (Scope)
               </label>
               <select id="tipoDatoComparado"
-                class="w-full bg-surface-container-low border-0 ring-1 ring-outline-variant/30 rounded py-2 px-3 text-xs font-medium focus:ring-2 focus:ring-primary">
+                class="w-full bg-[#f8fafc] text-[#334155] border border-[#cbd5e1] rounded-lg py-2.5 px-3 text-xs font-semibold shadow-sm focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all appearance-none cursor-pointer">
                 <option value="parametros">Parámetros</option>
                 <option value="datasets">DataSets</option>
                 <option value="ambos">Ambos</option>
@@ -304,6 +309,19 @@
              REQ 6 + 13: Contenedor de comparaciones acumuladas
              Cada bloque tiene .comparacion-block y data-comparacion-id
         ══════════════════════════════════════════════════════════ -->
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xs font-black uppercase tracking-widest text-on-surface-variant flex items-center gap-2">
+          <span class="material-symbols-outlined text-sm">history</span> Historial de Comparaciones
+        </h2>
+        <div class="flex items-center gap-2">
+          <button id="btnExpandAll" class="text-[10px] font-bold px-3 py-1 rounded bg-surface-container-low border border-outline-variant/30 hover:bg-surface-container transition-all">
+            EXPANDIR TODO
+          </button>
+          <button id="btnCollapseAll" class="text-[10px] font-bold px-3 py-1 rounded bg-surface-container-low border border-outline-variant/30 hover:bg-surface-container transition-all">
+            COLAPSAR TODO
+          </button>
+        </div>
+      </div>
       <div id="comparisonsContainer" class="space-y-6">
         <div id="emptyState"
           class="flex flex-col items-center justify-center py-20 bg-surface-container-low/20 rounded-xl border-2 border-dashed border-outline-variant/30 text-outline">
@@ -365,72 +383,84 @@
         </div>
       </div>
 
-      <div class="comparacion-body">
+      <div class="comparacion-body" style="display: none;">
         <!-- Sección Parámetros -->
         <div class="comparacion-seccion-parametros" data-seccion="parametros">
-          <div class="px-6 py-2 bg-blue-50/50 border-b border-outline-variant/10 flex items-center gap-2">
-            <span class="material-symbols-outlined text-xs text-primary">list_alt</span>
-            <span class="text-[10px] font-black uppercase text-primary tracking-wider">Parámetros</span>
+          <div class="px-6 py-2 bg-blue-50/50 border-b border-outline-variant/10 flex items-center justify-between cursor-pointer hover:bg-blue-100/50 transition-colors btnToggleSubSeccion">
+            <div class="flex items-center gap-4">
+              <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-xs text-primary">list_alt</span>
+                <span class="text-[10px] font-black uppercase text-primary tracking-wider">Parámetros</span>
+              </div>
+              <div class="flex items-center gap-2 border-l border-primary/20 pl-4">
+                <span class="text-[9px] font-bold text-primary/60 uppercase">Filtrar:</span>
+                <select
+                  class="filtro-estado bg-white text-[#334155] border border-[#cbd5e1] rounded pl-2 pr-6 py-0.5 text-[10px] font-bold uppercase cursor-pointer hover:border-primary outline-none focus:ring-1 focus:ring-primary/30 transition-colors"
+                  data-comparacion-id="" data-seccion="parametros">
+                  <option value="todos">Todos los estados</option>
+                  <option value="igual">Igual</option>
+                  <option value="diferente">Diferente</option>
+                  <option value="sobrante">Sobrante</option>
+                  <option value="faltante">Faltante</option>
+                </select>
+              </div>
+            </div>
+            <span class="material-symbols-outlined text-sm text-primary/50 toggle-icon">expand_more</span>
           </div>
-          <div class="overflow-x-auto">
-            <table class="w-full text-left border-collapse tablaResultados">
-              <thead class="sticky top-0 bg-surface-container-low z-10">
-                <tr class="text-[10px] font-bold uppercase text-outline border-b border-outline-variant/30">
-                  <th class="px-6 py-3 w-1/3">Nodo / Campo</th>
-                  <th class="px-6 py-3">Valor A</th>
-                  <th class="px-6 py-3">Valor B</th>
-                  <th class="px-4 py-3 w-44">
-                    <div class="flex items-center gap-1">
-                      <span>Estado</span>
-                      <select
-                        class="filtro-estado bg-transparent border-none p-0 text-[10px] font-bold uppercase focus:ring-0 cursor-pointer"
-                        data-comparacion-id="" data-seccion="parametros">
-                        <option value="todos">▾ Todos</option>
-                        <option value="igual">Igual</option>
-                        <option value="diferente">Diferente</option>
-                        <option value="sobrante">Sobrante</option>
-                        <option value="faltante">Faltante</option>
-                      </select>
-                    </div>
-                  </th>
-                </tr>
-              </thead>
-              <tbody class="text-xs tbodyParametros"></tbody>
-            </table>
+          <div class="comparacion-subseccion-body" style="display: none;">
+            <div class="overflow-x-auto">
+              <table class="w-full text-left border-collapse tablaResultados">
+                <thead class="sticky top-0 bg-surface-container-low z-10">
+                  <tr class="text-[10px] font-bold uppercase text-outline border-b border-outline-variant/30">
+                    <th class="px-6 py-3 w-1/3">Nodo / Campo</th>
+                    <th class="px-6 py-3">Valor A</th>
+                    <th class="px-6 py-3">Valor B</th>
+                    <th class="px-4 py-3 w-44">Estado</th>
+                  </tr>
+                </thead>
+                <tbody class="text-xs tbodyParametros"></tbody>
+              </table>
+            </div>
           </div>
         </div>
 
         <!-- Sección DataSets -->
         <div class="comparacion-seccion-datasets border-t border-outline-variant/20" data-seccion="datasets">
-          <div class="px-6 py-2 bg-cyan-50/50 border-b border-outline-variant/10 flex items-center gap-2">
-            <span class="material-symbols-outlined text-xs text-secondary">database</span>
-            <span class="text-[10px] font-black uppercase text-secondary tracking-wider">DataSets</span>
+          <div class="px-6 py-2 bg-cyan-50/50 border-b border-outline-variant/10 flex items-center justify-between cursor-pointer hover:bg-cyan-100/50 transition-colors btnToggleSubSeccion">
+            <div class="flex items-center gap-4">
+              <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-xs text-secondary">database</span>
+                <span class="text-[10px] font-black uppercase text-secondary tracking-wider">DataSets</span>
+              </div>
+              <div class="flex items-center gap-2 border-l border-secondary/20 pl-4">
+                <span class="text-[9px] font-bold text-secondary/60 uppercase">Filtrar:</span>
+                <select
+                  class="filtro-estado bg-white text-[#334155] border border-[#cbd5e1] rounded pl-2 pr-6 py-0.5 text-[10px] font-bold uppercase cursor-pointer hover:border-secondary outline-none focus:ring-1 focus:ring-secondary/30 transition-colors"
+                  data-comparacion-id="" data-seccion="datasets">
+                  <option value="todos">Todos los estados</option>
+                  <option value="igual">Igual</option>
+                  <option value="diferente">Diferente</option>
+                  <option value="sobrante">Sobrante</option>
+                  <option value="faltante">Faltante</option>
+                </select>
+              </div>
+            </div>
+            <span class="material-symbols-outlined text-sm text-secondary/50 toggle-icon">expand_more</span>
           </div>
-          <div class="overflow-x-auto">
-            <table class="w-full text-left border-collapse tablaResultados">
-              <thead class="sticky top-0 bg-surface-container-low z-10">
-                <tr class="text-[10px] font-bold uppercase text-outline border-b border-outline-variant/30">
-                  <th class="px-6 py-3 w-1/3">Nodo / Campo</th>
-                  <th class="px-6 py-3">Valor A</th>
-                  <th class="px-6 py-3">Valor B</th>
-                  <th class="px-4 py-3 w-44">
-                    <div class="flex items-center gap-1">
-                      <span>Estado</span>
-                      <select
-                        class="filtro-estado bg-transparent border-none p-0 text-[10px] font-bold uppercase focus:ring-0 cursor-pointer"
-                        data-comparacion-id="" data-seccion="datasets">
-                        <option value="todos">▾ Todos</option>
-                        <option value="igual">Igual</option>
-                        <option value="diferente">Diferente</option>
-                        <option value="sobrante">Sobrante</option>
-                        <option value="faltante">Faltante</option>
-                      </select>
-                    </div>
-                  </th>
-                </tr>
-              </thead>
-              <tbody class="text-xs tbodyDatasets"></tbody>
-            </table>
+          <div class="comparacion-subseccion-body" style="display: none;">
+            <div class="overflow-x-auto">
+              <table class="w-full text-left border-collapse tablaResultados">
+                <thead class="sticky top-0 bg-surface-container-low z-10">
+                  <tr class="text-[10px] font-bold uppercase text-outline border-b border-outline-variant/30">
+                    <th class="px-6 py-3 w-1/3">Nodo / Campo</th>
+                    <th class="px-6 py-3">Valor A</th>
+                    <th class="px-6 py-3">Valor B</th>
+                    <th class="px-4 py-3 w-44">Estado</th>
+                  </tr>
+                </thead>
+                <tbody class="text-xs tbodyDatasets"></tbody>
+              </table>
+            </div>
           </div>
         </div>
 
