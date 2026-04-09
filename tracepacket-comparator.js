@@ -4,7 +4,7 @@
  */
 
 $(function () {
-  
+
   const STATUS = Object.freeze({
     IGUAL: 'igual',
     DIFERENTE: 'diferente',
@@ -25,7 +25,7 @@ $(function () {
   // XmlParser
   // ==========================================
   const XmlParser = (function () {
-    
+
     function parsearXML(xmlString) {
       // Remover cabeceras XML que rompan el parsing sin un wrapper global y encerrar todo
       const raw = xmlString.trim().replace(/<\?xml[^?]*\?>/gi, '').trim();
@@ -42,16 +42,24 @@ $(function () {
       const ejecuciones = [];
       let idx = 0;
       const countNombres = {};
+      let currentBoSeq = 0;
+      let lastBoName = null;
 
       packets.forEach(packet => {
         const metodo = $(packet).find('> methodName').text().trim();
         if (!metodo) return;
 
-        const bo = $(packet).find('> businessObject').text().trim() || 
-                   $(packet).find('> objectName').text().trim() || '';
+        const bo = $(packet).find('> businessObject').text().trim() ||
+          $(packet).find('> objectName').text().trim() || '';
 
         // Ignorar rutinas recurrentes de monitoreo si existen
         if (BO_IGNORADOS.some(b => bo.includes(b) || metodo.includes(b))) return;
+
+        // Numeración cronológica de BOs: detectar cambios de BO
+        if (bo !== lastBoName) {
+          currentBoSeq++;
+          lastBoName = bo;
+        }
 
         idx++;
         countNombres[metodo] = (countNombres[metodo] || 0) + 1;
@@ -59,6 +67,8 @@ $(function () {
         ejecuciones.push({
           globalIndex: idx,
           methodIndex: countNombres[metodo],
+          boSequence: currentBoSeq,
+          boLabel: `[${currentBoSeq}] ${bo}`,
           label: `${metodo} [${countNombres[metodo]}]`,
           metodo: metodo,
           businessObject: bo,
@@ -84,7 +94,7 @@ $(function () {
       Array.from(seccion.children).forEach(param => {
         const tag = param.localName || param.nodeName;
         if (!tag.includes(itemTag)) return;
-        
+
         // Si tiene hijos elementos, no es un par de clave/valor simple, es un DataSet.
         if (param.children && param.children.length > 0) return;
 
@@ -118,7 +128,7 @@ $(function () {
           // Algoritmo dinámico para leer filas de tablas saltando wrappers.
           function findTables(node) {
             if (node.nodeType !== 1) return; // Omitir texto
-            
+
             const children = Array.from(node.children).filter(c => c.nodeType === 1);
             if (children.length === 0) return; // Vacio 
 
@@ -150,8 +160,15 @@ $(function () {
     }
 
     function obtenerBOs(ejecuciones) {
-      const bos = new Set(ejecuciones.map(e => e.businessObject || '(desconocido)'));
-      return [...bos].sort();
+      const labels = [];
+      const seen = new Set();
+      ejecuciones.forEach(e => {
+        if (!seen.has(e.boLabel)) {
+          seen.add(e.boLabel);
+          labels.push(e.boLabel);
+        }
+      });
+      return labels;
     }
 
     return { parsearXML, obtenerBOs };
@@ -181,11 +198,11 @@ $(function () {
       // Buscar la primera clave primaria válida en orden
       for (const pk of EPICOR_PK_FIELDS) {
         if (row[pk] !== undefined && row[pk] !== null && row[pk] !== '') {
-          return `${pk}=${row[pk]}`; 
+          return `${pk}=${row[pk]}`;
         }
       }
       // Hash backup de todos los campos
-      return Object.entries(row).map(([k,v]) => `${k}=${v}`).join('|');
+      return Object.entries(row).map(([k, v]) => `${k}=${v}`).join('|');
     }
 
     function compararParametros(mapA, mapB) {
@@ -218,7 +235,7 @@ $(function () {
           });
         }
       });
-      
+
       const order = { [STATUS.DIFERENTE]: 1, [STATUS.SOBRANTE]: 2, [STATUS.FALTANTE]: 3, [STATUS.IGUAL]: 4 };
       return resultados.sort((x, y) => order[x.status] - order[y.status]);
     }
@@ -279,11 +296,11 @@ $(function () {
               const vb = rowB[f];
               let st;
               if (va !== undefined && vb !== undefined) {
-                 st = _sonIguales(va, 'string', vb, 'string') ? STATUS.IGUAL : STATUS.DIFERENTE;
+                st = _sonIguales(va, 'string', vb, 'string') ? STATUS.IGUAL : STATUS.DIFERENTE;
               } else if (va !== undefined) {
-                 st = STATUS.SOBRANTE;
+                st = STATUS.SOBRANTE;
               } else {
-                 st = STATUS.FALTANTE;
+                st = STATUS.FALTANTE;
               }
               resultados.push({
                 categoria: 'datasets', tblName, dsNameA: tbA?.dsName, dsNameB: tbB?.dsName,
@@ -381,13 +398,13 @@ $(function () {
     }
 
     // Handlers Generales
-    $('#dropZone, #fileInput').on('change drop', function(e) {
+    $('#dropZone, #fileInput').on('change drop', function (e) {
       e.preventDefault();
       const file = e.type === 'drop' ? e.originalEvent.dataTransfer.files[0] : (e.target.files ? e.target.files[0] : null);
       if (!file) return;
 
       $('#fileName').text(file.name);
-      
+
       const reader = new FileReader();
       reader.onload = e => {
         try {
@@ -401,8 +418,8 @@ $(function () {
       reader.readAsText(file, 'UTF-8');
     }).on('dragover', e => e.preventDefault());
 
-    $('#btnCargarXml, #dropZone').on('click', function(e) {
-      if (e.target.id === 'fileInput') return; 
+    $('#btnCargarXml, #dropZone').on('click', function (e) {
+      if (e.target.id === 'fileInput') return;
       $('#fileInput')[0].click();
     });
 
@@ -425,24 +442,24 @@ $(function () {
       });
     }
 
-    $('#selectBusinessObjectA, #selectBusinessObjectB').on('change', function() {
+    $('#selectBusinessObjectA, #selectBusinessObjectB').on('change', function () {
       const sId = this.id.endsWith('A') ? '#selectMetodoA' : '#selectMetodoB';
-      const bo = $(this).val();
+      const boLabel = $(this).val();
       $(sId).empty().append('<option value="">— Seleccione Método —</option>');
-      _ejecuciones.filter(e => e.businessObject === bo || !bo).forEach(e => {
+      _ejecuciones.filter(e => e.boLabel === boLabel || !boLabel).forEach(e => {
         $(sId).append(`<option value="${e.label}">[${e.globalIndex}] ${e.label}</option>`);
       });
     });
 
-    $('#tipoComparacion').on('change', function() {
+    $('#tipoComparacion').on('change', function () {
       const needsB = $(this).val() === 'output-vs-input';
       $('#selectBusinessObjectB, #selectMetodoB').prop('disabled', !needsB)
         .parent().toggleClass('opacity-40', !needsB);
     });
 
-    $('#btnAgregarComparacion, #btnComparar').on('click', function() {
+    $('#btnAgregarComparacion, #btnComparar').on('click', function () {
       if (!_ejecuciones.length) return _mostrarToast('Carga un archivo XML primero.', true);
-      
+
       const labelA = $('#selectMetodoA').val();
       const labelB = $('#selectMetodoB').val();
       const tipo = $('#tipoComparacion').val();
@@ -469,14 +486,14 @@ $(function () {
 
       const resul = MotorComparacion.comparar(dataA, dataB, scope);
       const item = GestorEstado.agregar({ labelA, labelB, tipo, scope, contexto, resultados: resul });
-      
+
       _renderTablas(item);
     });
 
     function _renderTablas(item) {
       const tmpl = $('#tmplComparacionBlock')[0].content.cloneNode(true);
       const $b = $(tmpl).find('.comparacion-block');
-      
+
       $b.attr('data-comparacion-id', item.id);
       $b.find('.comparacion-badge').text('C' + item.seqNum);
       $b.find('.comparacion-contexto').text(item.contexto);
@@ -505,8 +522,8 @@ $(function () {
         // Agrupar filas para ordenar el display visualmente 
         const tbm = new Map();
         item.resultados.datasets.forEach(r => {
-          if(!tbm.has(r.tblName)) tbm.set(r.tblName, new Map());
-          if(!tbm.get(r.tblName).has(r.recordKey)) tbm.get(r.tblName).set(r.recordKey, []);
+          if (!tbm.has(r.tblName)) tbm.set(r.tblName, new Map());
+          if (!tbm.get(r.tblName).has(r.recordKey)) tbm.get(r.tblName).set(r.recordKey, []);
           tbm.get(r.tblName).get(r.recordKey).push(r);
         });
 
@@ -538,14 +555,14 @@ $(function () {
                   </td>
                 </tr>
               `);
-              
+
               // Ordenar celdas priorizando diferentes arriba
-              const sorteados = campos.sort((a,b) => {
+              const sorteados = campos.sort((a, b) => {
                 const s1 = a.status === STATUS.IGUAL ? 1 : 0;
                 const s2 = b.status === STATUS.IGUAL ? 1 : 0;
                 return s1 - s2;
               });
-              
+
               sorteados.forEach(c => {
                 tbodyD.append(`
                   <tr class="border-b border-outline-variant/10 hover:bg-surface-container-low transition-colors data-${c.status}" data-estado="${c.status}">
@@ -560,19 +577,19 @@ $(function () {
           });
         }
       } else {
-         $b.find('.comparacion-seccion-datasets').hide();
+        $b.find('.comparacion-seccion-datasets').hide();
       }
 
       // Eventos del nuevo bloque inyectado
-      $b.find('.btnEliminarBloque').attr('data-id', item.id).on('click', function() {
+      $b.find('.btnEliminarBloque').attr('data-id', item.id).on('click', function () {
         GestorEstado.eliminar(item.id);
         $b.slideUp(200, () => {
-           $b.remove();
-           if (!$('.comparacion-block').length) $('#emptyState').show();
+          $b.remove();
+          if (!$('.comparacion-block').length) $('#emptyState').show();
         });
       });
 
-      $b.find('.btnColapsarBloque').on('click', function() {
+      $b.find('.btnColapsarBloque').on('click', function () {
         $b.find('.comparacion-body').slideToggle();
         const $i = $(this).find('span');
         $i.text($i.text().includes('expand_more') ? 'expand_less' : 'expand_more');
@@ -581,23 +598,23 @@ $(function () {
       $b.find('.btnExportarBloque').on('click', () => _exportarCSV(item));
 
       // Filtro local en Acordeon 
-      $b.find('.filtro-estado').on('change', function() {
+      $b.find('.filtro-estado').on('change', function () {
         const val = $(this).val();
         const sec = $(this).attr('data-seccion');
         const tb = sec === 'parametros' ? tbodyP : tbodyD;
-        
+
         // Hide/Show celdas
-        tb.find('tr[data-estado]').each(function() {
+        tb.find('tr[data-estado]').each(function () {
           $(this).toggle(val === 'todos' || $(this).data('estado') === val);
         });
 
         // Hide/Show agrupadores para no dejar tables colgadas sin rows child
         if (sec === 'datasets') {
-          tb.find('tr[data-record]').each(function() {
+          tb.find('tr[data-record]').each(function () {
             const vis = $(this).nextUntil('tr[data-record], tr[data-table]').filter(':visible').length > 0;
             $(this).toggle(vis);
           });
-          tb.find('tr[data-table]').each(function() {
+          tb.find('tr[data-table]').each(function () {
             const vis = $(this).nextUntil('tr[data-table]').filter(':visible').length > 0;
             $(this).toggle(vis);
           });
@@ -607,7 +624,7 @@ $(function () {
       $('#emptyState').hide();
       $('#comparisonsContainer').prepend($b);
       // Animamos el scroll al nuevo insert
-      $('html, body').animate({ scrollTop: $b.offset().top - 80 }, 400); 
+      $('html, body').animate({ scrollTop: $b.offset().top - 80 }, 400);
       _mostrarToast(`Comparación C${item.seqNum} añadida con éxito.`);
     }
 
@@ -616,7 +633,7 @@ $(function () {
       if (!item) return;
       const mapLegacy = { [STATUS.IGUAL]: 'igual', [STATUS.DIFERENTE]: 'diferente', [STATUS.SOBRANTE]: 'solo-a', [STATUS.FALTANTE]: 'solo-b' };
       const csv = ['Contexto,Categoria,SubRuta,Campo,ValorA,ValorB,Estado,Estado_Legacy'];
-      
+
       const cel = v => v ? `"${String(v).replace(/"/g, '""')}"` : '';
 
       item.resultados.parametros.forEach(p => {
@@ -636,7 +653,7 @@ $(function () {
     $('#btnExportarExcel').on('click', () => {
       GestorEstado.obtenerTodos().forEach(i => _exportarCSV(i));
     });
-    
+
     $('#btnLimpiar').on('click', () => {
       if (confirm('¿Deseas eliminar todas las comparaciones de la interfaz?')) {
         GestorEstado.vaciar();
