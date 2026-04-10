@@ -95,14 +95,46 @@ $(function () {
         const tag = param.localName || param.nodeName;
         if (!tag.includes(itemTag)) return;
 
-        // Si tiene hijos elementos, no es un par de clave/valor simple, es un DataSet.
-        if (param.children && param.children.length > 0) return;
+        const nameAttr = $(param).attr('name') || '';
+        const typeAttr = $(param).attr('type') || '';
 
-        const name = $(param).attr('name') || '';
-        const type = $(param).attr('type') || '';
+        // Función auxiliar recursiva para aplanar nodos
+        function _aplanar(node, currentPath) {
+          const children = Array.from(node.children).filter(c => c.nodeType === 1);
+          if (children.length === 0) {
+            // Nodo hoja: guardar valor
+            const val = $(node).text().trim();
+            mapa.set(currentPath, { name: currentPath, type: typeAttr, value: val });
+          } else {
+            // Nodo con hijos: navegar
+            children.forEach(child => {
+              let cname = child.localName || child.nodeName;
+              if (cname.includes(':')) cname = cname.split(':')[1];
+              _aplanar(child, currentPath + ' / ' + cname);
+            });
+          }
+        }
+
+        if (param.children && param.children.length > 0) {
+          // Detectar si es un objeto de Contexto o metadatos
+          const firstChild = param.children[0];
+          let fcName = (firstChild.localName || firstChild.nodeName).split(':')[1] || firstChild.nodeName;
+          
+          const esContexto = fcName.includes('Context') || 
+                            nameAttr.toLowerCase().includes('context') || 
+                            typeAttr.toLowerCase().includes('context');
+
+          if (esContexto) {
+            _aplanar(param, nameAttr || tag);
+          }
+          // Si es un DataSet de negocio real, NO aplanamos aquí.
+          // Se deja para que lo procese extraerDatasets() y se vea en las tablas inferiores.
+          return;
+        }
+
+        // Parámetro simple (llave/valor)
         const val = $(param).text().trim();
-
-        if (name) mapa.set(name, { name, type, value: val });
+        if (nameAttr) mapa.set(nameAttr, { name: nameAttr, type: typeAttr, value: val });
       });
       return mapa;
     }
@@ -225,13 +257,15 @@ $(function () {
           resultados.push({
             categoria: 'parametros', name: k,
             valA: a.value, valB: null,
-            status: STATUS.SOBRANTE // Input vs Output A -> Está en el Input y no en Output.
+            typeA: a.type, typeB: null,
+            status: STATUS.SOBRANTE 
           });
         } else {
           resultados.push({
             categoria: 'parametros', name: k,
             valA: null, valB: b.value,
-            status: STATUS.FALTANTE // Output A vs Input B -> Falta en A pero está en B.
+            typeA: null, typeB: b.type,
+            status: STATUS.FALTANTE 
           });
         }
       });
@@ -457,7 +491,7 @@ $(function () {
         .parent().toggleClass('opacity-40', !needsB);
     });
 
-    $('#btnAgregarComparacion, #btnComparar').on('click', function () {
+    $('#btnComparar').on('click', function () {
       if (!_ejecuciones.length) return _mostrarToast('Carga un archivo XML primero.', true);
 
       const labelA = $('#selectMetodoA').val();
@@ -478,10 +512,10 @@ $(function () {
       let dataA, dataB, contexto;
       if (tipo === 'input-vs-output') {
         dataA = ea.input; dataB = ea.output;
-        contexto = `Input ${ea.label} vs Output ${ea.label}`;
+        contexto = ea.label; // Ejemplo: ChangeJob [1]
       } else {
         dataA = ea.output; dataB = eb.input;
-        contexto = `Output ${ea.label} vs Input ${eb.label}`;
+        contexto = `${ea.label} vs ${eb.label}`; // Ejemplo: Job [1] vs Order [1]
       }
 
       const resul = MotorComparacion.comparar(dataA, dataB, scope);
@@ -517,9 +551,9 @@ $(function () {
         item.resultados.parametros.forEach(r => {
           tbodyP.append(`
             <tr class="border-b border-outline-variant/10 hover:bg-surface-container-low transition-colors data-${r.status}" data-estado="${r.status}">
-              <td class="px-6 py-2 pl-10 font-mono text-xs">${_escapar(r.name)} <span class="text-[9px] text-gray-500">${r.typeA || r.typeB}</span></td>
-              <td class="px-6 py-2 w-1/4 break-words">${_formatoValor(r.valA)}</td>
-              <td class="px-6 py-2 w-1/4 break-words">${_formatoValor(r.valB)}</td>
+              <td class="px-6 py-2 pl-10 font-mono text-xs truncate" title="${_escapar(r.name)}">${_escapar(r.name)} <span class="text-[9px] text-gray-500">${r.typeA || r.typeB}</span></td>
+              <td class="px-6 py-2 break-all overflow-hidden">${_formatoValor(r.valA)}</td>
+              <td class="px-6 py-2 break-all overflow-hidden">${_formatoValor(r.valB)}</td>
               <td class="px-6 py-2">${_badge(r.status)}</td>
             </tr>
           `);
@@ -558,12 +592,19 @@ $(function () {
             let rootLabel = `${labelPrefA}: ${dsA} | ${labelPrefB}: ${dsB}`;
 
             const tableIdClass = `trows-${tname.replace(/[^a-zA-Z0-9]/g, '')}-${Math.random().toString(36).substr(2, 5)}`;
+            const relLabel = item.tipo === 'input-vs-output' ? 'Input A → Output A' : 'Output A → Input B';
+            // Limpiar nombres de métodos para el tag compacto (quitar prefijos redundantes)
+            const cleanCtx = item.tipo === 'input-vs-output' 
+                ? item.labelA 
+                : `${item.labelA} vs ${item.labelB}`;
+
             tbodyD.append(`
               <tr class="bg-surface-container-low border-b border-outline-variant/30 cursor-pointer hover:bg-surface-container transition-colors btnToggleTabla" data-target="${tableIdClass}">
                 <td colspan="4" class="px-6 pt-5 pb-3 text-on-surface">
                   <div class="flex flex-col gap-4">
-                    <div class="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
-                      <span class="material-symbols-outlined text-[14px]">database</span> DataSet: (${rootLabel || 'N/A'})
+                    <div class="flex items-center gap-2 text-[11px] font-semibold text-primary/80">
+                      <span class="material-symbols-outlined text-[15px]">compare_arrows</span> 
+                      ${relLabel} : <span class="text-slate-500 font-medium ml-1">${cleanCtx}</span>
                     </div>
                     <div class="flex items-center justify-between">
                       <div class="flex items-center gap-2 text-[14px] font-bold text-primary">
@@ -598,9 +639,9 @@ $(function () {
 
                 tbodyD.append(`
                   <tr class="border-b border-outline-variant/10 hover:bg-surface-container-low transition-colors data-${c.status} ${tableIdClass}" data-estado="${c.status}" style="display:none;">
-                    <td class="px-6 py-1.5 pl-10 text-[11px] font-mono font-medium">${_escapar(c.fieldName)}</td>
-                    <td class="px-6 py-1.5 w-1/4 break-words">${_formatoValor(c.valA)}</td>
-                    <td class="px-6 py-1.5 w-1/4 break-words">${_formatoValor(c.valB)}</td>
+                    <td class="px-6 py-1.5 pl-10 text-[11px] font-mono font-medium truncate" title="${_escapar(c.fieldName)}">${_escapar(c.fieldName)}</td>
+                    <td class="px-6 py-1.5 break-all overflow-hidden">${_formatoValor(c.valA)}</td>
+                    <td class="px-6 py-1.5 break-all overflow-hidden">${_formatoValor(c.valB)}</td>
                     <td class="px-6 py-1.5">${_badge(c.status)}</td>
                   </tr>
                 `);
@@ -644,9 +685,10 @@ $(function () {
         const tgt = $(this).attr('data-target');
         const rows = $b.find(`.${tgt}`);
         const isHidden = rows.first().is(':hidden');
-        
+
         if (isHidden) {
-          rows.fadeIn(250);
+          // Asegurar display: table-row para evitar descuadres en layout fijo
+          rows.css('display', 'table-row').hide().fadeIn(250);
           $(this).find('.toggle-icon').text('expand_less');
         } else {
           rows.fadeOut(200);
@@ -665,7 +707,7 @@ $(function () {
       $b.find('.filtro-estado-tabla').on('change', function () {
         const val = $(this).val();
         const tgtClass = $(this).attr('data-target');
-        
+
         $b.find('.' + tgtClass).each(function () {
           const isMatch = (val === 'todos' || $(this).attr('data-estado') === val);
           $(this).toggleClass('filtered-out', !isMatch);
@@ -679,8 +721,8 @@ $(function () {
         const tb = sec === 'parametros' ? tbodyP : tbodyD;
 
         if (sec === 'datasets') {
-           // Reseteo forzado de selectores locales
-           $b.find('.filtro-estado-tabla').val('todos');
+          // Reseteo forzado de selectores locales
+          $b.find('.filtro-estado-tabla').val('todos');
         }
 
         // Hide/Show celdas
