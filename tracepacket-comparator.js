@@ -752,31 +752,248 @@ $(function () {
       _mostrarToast(`Comparación C${item.seqNum} añadida con éxito.`);
     }
 
-    // Exportador de datos 
-    function _exportarCSV(item) {
-      if (!item) return;
-      const mapLegacy = { [STATUS.IGUAL]: 'igual', [STATUS.DIFERENTE]: 'diferente', [STATUS.SOBRANTE]: 'solo-a', [STATUS.FALTANTE]: 'solo-b' };
-      const csv = ['Contexto,Categoria,SubRuta,Campo,ValorA,ValorB,Estado,Estado_Legacy'];
-
-      const cel = v => v ? `"${String(v).replace(/"/g, '""')}"` : '';
-
-      item.resultados.parametros.forEach(p => {
-        csv.push(`"${item.contexto}","Parametros","Params","${p.name}",${cel(p.valA)},${cel(p.valB)},${p.status},${mapLegacy[p.status]}`);
-      });
-      item.resultados.datasets.forEach(d => {
-        csv.push(`"${item.contexto}","DataSets","${d.tblName}[${d.recordKey}]","${d.fieldName}",${cel(d.valA)},${cel(d.valB)},${d.status},${mapLegacy[d.status]}`);
-      });
-
-      const blob = new Blob(['\uFEFF' + csv.join('\n')], { type: 'text/csv;charset=utf-8;' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `C${item.seqNum}_export_${Date.now()}.csv`;
-      a.click();
-    }
-
+    // Handlers del Modal de Exportación
     $('#btnExportarExcel').on('click', () => {
-      GestorEstado.obtenerTodos().forEach(i => _exportarCSV(i));
+      if (!_ejecuciones.length) return _mostrarToast('Carga un archivo XML primero.', true);
+      $('#modalExportExcel').removeClass('hidden').addClass('flex');
     });
+
+    $('#btnCloseModal').on('click', () => {
+      $('#modalExportExcel').removeClass('flex').addClass('hidden');
+    });
+
+    $('#btnExportAllXML').on('click', () => {
+      $('#modalExportExcel').removeClass('flex').addClass('hidden');
+      _generarYDescargarMatriz('todo');
+    });
+
+    $('#btnExportUIOnly').on('click', () => {
+      if (GestorEstado.obtenerTodos().length === 0) {
+        return _mostrarToast('No hay comparaciones en la pantalla para exportar.', true);
+      }
+      $('#modalExportExcel').removeClass('flex').addClass('hidden');
+      _generarYDescargarMatriz('pantalla');
+    });
+
+    // Motor de Matriz Excel (Con ExcelJS y Estilos de Mapa de Calor)
+    async function _generarYDescargarMatriz(modo) {
+      if (typeof ExcelJS === 'undefined') {
+        return _mostrarToast('Error: La librería ExcelJS no ha cargado. Verifica tu conexión a internet.', true);
+      }
+
+      _mostrarToast('Construyendo matriz mapa de calor...', false);
+
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Matriz Traza');
+
+      // 1. Construir Línea de Tiempo (Columnas)
+      const pasos = [];
+      const _pasosKeySet = new Set();
+
+      if (modo === 'todo') {
+        _ejecuciones.forEach(e => {
+          pasos.push({ key: `I_${e.globalIndex}`, tipo: 'input', label: `[${e.globalIndex}] In: ${e.metodo}`, data: e.input });
+          pasos.push({ key: `O_${e.globalIndex}`, tipo: 'output', label: `[${e.globalIndex}] Out: ${e.metodo}`, data: e.output });
+        });
+      } else {
+        GestorEstado.obtenerTodos().forEach(c => {
+          const ea = _ejecuciones.find(e => e.label === c.labelA);
+          const eb = c.tipo === 'output-vs-input' ? _ejecuciones.find(e => e.label === c.labelB) : ea;
+          
+          let ka, kb, la, lb, da, db;
+          if (c.tipo === 'input-vs-output') {
+              ka = `I_${ea.globalIndex}`; da = ea.input; la = `[${ea.globalIndex}] In: ${ea.metodo}`;
+              kb = `O_${ea.globalIndex}`; db = ea.output; lb = `[${ea.globalIndex}] Out: ${ea.metodo}`;
+          } else {
+              ka = `O_${ea.globalIndex}`; da = ea.output; la = `[${ea.globalIndex}] Out: ${ea.metodo}`;
+              kb = `I_${eb.globalIndex}`; db = eb.input; lb = `[${eb.globalIndex}] In: ${eb.metodo}`;
+          }
+
+          if (!_pasosKeySet.has(ka)) { _pasosKeySet.add(ka); pasos.push({ key: ka, label: la, data: da }); }
+          if (!_pasosKeySet.has(kb)) { _pasosKeySet.add(kb); pasos.push({ key: kb, label: lb, data: db }); }
+        });
+        
+        pasos.sort((a,b) => {
+           const [tA, idxA] = a.key.split('_');
+           const [tB, idxB] = b.key.split('_');
+           if (idxA !== idxB) return parseInt(idxA) - parseInt(idxB);
+           return tA === 'I' ? -1 : 1; 
+        });
+      }
+
+      // 2. Extraer Nodos Únicos (Filas)
+      const filasMapa = new Map();
+      pasos.forEach(paso => {
+        paso.data.parametros.forEach((obj, pName) => {
+          const fKey = `PARAM|||${pName}`;
+          if (!filasMapa.has(fKey)) filasMapa.set(fKey, { c: 'Parámetros o Sistema', t: '-', r: '-', f: pName });
+        });
+        
+        paso.data.datasets.forEach((tblMap, dsName) => {
+          tblMap.forEach((rows, tblName) => {
+            rows.forEach(row => {
+              let rKey = '-';
+              for (const pk of EPICOR_PK_FIELDS) {
+                if (row[pk] !== undefined && row[pk] !== null && row[pk] !== '') {
+                  rKey = `${pk}=${row[pk]}`; break;
+                }
+              }
+              if (rKey === '-') rKey = Object.entries(row).map(([k, v]) => `${k}=${v}`).join('|');
+
+              Object.keys(row).forEach(fName => {
+                const fKey = `DS|${tblName}|${rKey}|${fName}`;
+                const esSis = ['SysRowID', 'RowMod', 'SysRevID'].includes(fName);
+                if (!filasMapa.has(fKey)) {
+                  filasMapa.set(fKey, { c: esSis ? 'Campos de Sistema' : 'DataSets', t: tblName, r: rKey, f: fName });
+                }
+              });
+            });
+          });
+        });
+      });
+
+      // 3. Evaluar Estados y Construir Hoja
+      // Configuración de Columnas
+      const columnsDef = [
+        { header: 'Categoría', key: 'cat', width: 18 },
+        { header: 'Tabla / Entidad', key: 'tbl', width: 22 },
+        { header: 'ID Único (PK)', key: 'pk', width: 35 },
+        { header: 'Nodo / Campo', key: 'nodo', width: 25 }
+      ];
+
+      pasos.forEach(p => {
+         columnsDef.push({ header: p.label, key: p.key, width: 26 });
+      });
+
+      worksheet.columns = columnsDef;
+
+      // Estilos del Header Principal
+      worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F2937' } }; // Gris muy oscuro
+      worksheet.getRow(1).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      
+      // Congelar paneles: 1 fila de header y 4 columnas de identificadores
+      worksheet.views = [{ state: 'frozen', xSplit: 4, ySplit: 1 }];
+
+      // Colores semánticos (Hex ARGB) sincronizados con la UI
+      const COLOR_IGUAL = 'FFDCFCE7';     // Verde claro (Igual)
+      const COLOR_DIFERENTE = 'FFFEE2E2'; // Rojo claro (Diferente)
+      const COLOR_SOBRANTE = 'FFFEF3C7';  // Amarillo/Ámbar claro (Sobrante)
+      const COLOR_FALTANTE = 'FFFFE4E6';  // Rosa claro (Faltante)
+
+      filasMapa.forEach((meta, fKey) => {
+         const rowData = { cat: meta.c, tbl: meta.t, pk: String(meta.r).substring(0,50), nodo: meta.f };
+         const statesDict = {}; 
+         let lastValue = undefined;
+
+         for (let i = 0; i < pasos.length; i++) {
+            const paso = pasos[i];
+            let currVal = undefined;
+            
+            // Extraer valor temporal
+            if (fKey.startsWith('PARAM')) {
+               const pObj = paso.data.parametros.get(meta.f);
+               if (pObj) currVal = pObj.value;
+            } else {
+               paso.data.datasets.forEach((tblMap, dsName) => {
+                  const rows = tblMap.get(meta.t);
+                  if (rows) {
+                     const r = rows.find(fila => {
+                         let tempK = '-';
+                         for (const pk of EPICOR_PK_FIELDS) {
+                           if (fila[pk] !== undefined && fila[pk] !== null && fila[pk] !== '') {
+                             tempK = `${pk}=${fila[pk]}`; break;
+                           }
+                         }
+                         if (tempK === '-') tempK = Object.entries(fila).map(([k, v]) => `${k}=${v}`).join('|');
+                         return tempK === meta.r;
+                     });
+                     if (r && r[meta.f] !== undefined) currVal = r[meta.f];
+                  }
+               });
+            }
+
+            // Guardar valor para la columna
+            rowData[paso.key] = currVal === undefined ? '' : String(currVal);
+
+            // Logica estructural para el color
+            let estado = '';
+            const norm = v => {
+                if (v === null || v === undefined) return '';
+                const s = String(v).trim();
+                const n = parseFloat(s);
+                return (!isNaN(n) && String(n) === s) ? n : s;
+            };
+
+            if (i > 0) {
+               if (currVal !== undefined && lastValue !== undefined) {
+                   estado = (norm(currVal) === norm(lastValue)) ? 'IGUAL' : 'DIFERENTE';
+               } else if (currVal !== undefined && lastValue === undefined) {
+                   estado = 'FALTANTE'; // B tiene el dato, pero A no lo envió
+               } else if (currVal === undefined && lastValue !== undefined) {
+                   estado = 'SOBRANTE'; // A envió el dato, pero B no lo tiene
+               }
+            }
+            
+            statesDict[paso.key] = estado;
+            lastValue = currVal; 
+         }
+
+         const addedRow = worksheet.addRow(rowData);
+         
+         // Aplicar Formato a cada celda de la fila insertada
+         addedRow.eachCell((cell, colNumber) => {
+             cell.alignment = { vertical: 'middle', wrapText: true };
+             
+             // Columnas base
+             if (colNumber <= 4) {
+                 cell.font = { color: { argb: 'FF475569' } }; 
+             } 
+             // Columnas Temporales (Dato mutante)
+             else {
+                 const pObj = pasos[colNumber - 5]; 
+                 if (pObj) {
+                     const estado = statesDict[pObj.key];
+                     if (estado === 'SOBRANTE') {
+                         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_SOBRANTE } };
+                         cell.font = { color: { argb: 'FF92400E' } }; // Texto ámbar
+                         if (!cell.value) cell.value = '—'; // Marcador visual de que B no recibe este dato
+                     } else if (estado === 'DIFERENTE') {
+                         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_DIFERENTE } };
+                         cell.font = { color: { argb: 'FF991B1B' }, bold: true }; // Texto rojo
+                     } else if (estado === 'FALTANTE') {
+                         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_FALTANTE } };
+                         cell.font = { color: { argb: 'FFBE123C' } }; // Texto rosa. El dato SÍ existe en B, así que lo mostramos.
+                     } else if (estado === 'IGUAL') {
+                         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_IGUAL } };
+                         cell.font = { color: { argb: 'FF166534' } }; // Texto verde
+                     } else {
+                         // ORIGEN o Sin Estado
+                         cell.font = { color: { argb: 'FF64748B' } }; 
+                     }
+                 }
+             }
+         });
+      });
+
+      // Añadir auto-filtro puro
+      worksheet.autoFilter = {
+         from: { row: 1, column: 1 },
+         to: { row: 1, column: columnsDef.length }
+      };
+
+      // 4. Descargar Buffer
+      try {
+        const buffer = await workbook.xlsx.writeBuffer();
+        const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const docName = `TrazaEpicor_MapaCalor_${modo === 'todo' ? 'Global' : 'Parcial'}_${Date.now()}.xlsx`;
+        saveAs(blob, docName);
+        _mostrarToast(`¡Mapa de Calor Excel descargado!`);
+      } catch(err) {
+        _mostrarToast(`Error generando Excel: ${err.message}`, true);
+        console.error(err);
+      }
+    }
 
     $('#btnLimpiar').on('click', () => {
       if (confirm('¿Deseas eliminar todas las comparaciones de la interfaz?')) {
