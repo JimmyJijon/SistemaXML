@@ -404,6 +404,7 @@ $(function () {
   // ==========================================
   const ControladorUI = (function () {
     let _ejecuciones = [];
+    let _archivoPendiente = null;
 
     function _mostrarToast(msg, error = false) {
       const color = error ? 'bg-red-600' : 'bg-green-600';
@@ -426,7 +427,7 @@ $(function () {
         [STATUS.IGUAL]: '<span class="px-2 py-0.5 rounded text-[9px] font-bold bg-green-100 text-green-700">IGUAL</span>',
         [STATUS.DIFERENTE]: '<span class="px-2 py-0.5 rounded text-[9px] font-bold bg-red-100 text-red-700">DIFERENTE</span>',
         [STATUS.SOBRANTE]: '<span class="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800">SOBRANTE</span>',
-        [STATUS.FALTANTE]: '<span class="px-2 py-0.5 rounded text-[9px] font-bold bg-rose-100 text-rose-700">FALTANTE</span>'
+        [STATUS.FALTANTE]: '<span class="px-2 py-0.5 rounded text-[9px] font-bold bg-orange-100 text-orange-700">FALTANTE</span>'
       };
       return b[estado] || estado;
     }
@@ -441,18 +442,26 @@ $(function () {
 
       const reader = new FileReader();
       reader.onload = e => {
-        try {
-          _ejecuciones = XmlParser.parsearXML(e.target.result);
-          _llenarCombos();
-          _mostrarToast(`¡Éxito! Se procesaron ${_ejecuciones.length} métodos.`);
-        } catch (err) {
-          _mostrarToast(err.message, true);
-        }
+        _archivoPendiente = e.target.result;
+        _mostrarToast(`Archivo "${file.name}" listo. Presione CARGAR DATA.`);
       };
       reader.readAsText(file, 'UTF-8');
     }).on('dragover', e => e.preventDefault());
 
-    $('#btnCargarXml, #dropZone').on('click', function (e) {
+    $('#btnCargarXml').on('click', function () {
+      if (!_archivoPendiente) {
+        return _mostrarToast('Primero seleccione un archivo XML.', true);
+      }
+      try {
+        _ejecuciones = XmlParser.parsearXML(_archivoPendiente);
+        _llenarCombos();
+        _mostrarToast(`¡Éxito! Se procesaron ${_ejecuciones.length} métodos.`);
+      } catch (err) {
+        _mostrarToast(err.message, true);
+      }
+    });
+
+    $('#dropZone').on('click', function (e) {
       if (e.target.id === 'fileInput') return;
       $('#fileInput')[0].click();
     });
@@ -461,6 +470,7 @@ $(function () {
       _ejecuciones = [];
       $('#fileName').text('Sin archivo');
       $('#fileInput').val('');
+      _archivoPendiente = null;
       GestorEstado.vaciar();
       $('#comparisonsContainer').empty();
       $('#emptyState').show();
@@ -879,7 +889,7 @@ $(function () {
       const COLOR_IGUAL = 'FFDCFCE7';     // Verde claro (Igual)
       const COLOR_DIFERENTE = 'FFFEE2E2'; // Rojo claro (Diferente)
       const COLOR_SOBRANTE = 'FFFEF3C7';  // Amarillo/Ámbar claro (Sobrante)
-      const COLOR_FALTANTE = 'FFFFE4E6';  // Rosa claro (Faltante)
+      const COLOR_FALTANTE = 'FFFFF7ED';  // Naranja claro (Faltante)
 
       filasMapa.forEach((meta, fKey) => {
          const rowData = { cat: meta.c, tbl: meta.t, pk: String(meta.r).substring(0,50), nodo: meta.f };
@@ -913,8 +923,8 @@ $(function () {
                });
             }
 
-            // Guardar valor para la columna
-            rowData[paso.key] = currVal === undefined ? '' : String(currVal);
+            // Guardar valor para la columna (preservamos undefined para diferenciar de vacío)
+            rowData[paso.key] = currVal;
 
             // Logica estructural para el color
             let estado = '';
@@ -941,39 +951,52 @@ $(function () {
 
          const addedRow = worksheet.addRow(rowData);
          
-         // Aplicar Formato a cada celda de la fila insertada
-         addedRow.eachCell((cell, colNumber) => {
-             cell.alignment = { vertical: 'middle', wrapText: true };
-             
-             // Columnas base
-             if (colNumber <= 4) {
-                 cell.font = { color: { argb: 'FF475569' } }; 
-             } 
-             // Columnas Temporales (Dato mutante)
-             else {
-                 const pObj = pasos[colNumber - 5]; 
-                 if (pObj) {
-                     const estado = statesDict[pObj.key];
-                     if (estado === 'SOBRANTE') {
-                         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_SOBRANTE } };
-                         cell.font = { color: { argb: 'FF92400E' } }; // Texto ámbar
-                         if (!cell.value) cell.value = '—'; // Marcador visual de que B no recibe este dato
-                     } else if (estado === 'DIFERENTE') {
-                         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_DIFERENTE } };
-                         cell.font = { color: { argb: 'FF991B1B' }, bold: true }; // Texto rojo
-                     } else if (estado === 'FALTANTE') {
-                         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_FALTANTE } };
-                         cell.font = { color: { argb: 'FFBE123C' } }; // Texto rosa. El dato SÍ existe en B, así que lo mostramos.
-                     } else if (estado === 'IGUAL') {
-                         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_IGUAL } };
-                         cell.font = { color: { argb: 'FF166534' } }; // Texto verde
-                     } else {
-                         // ORIGEN o Sin Estado
-                         cell.font = { color: { argb: 'FF64748B' } }; 
-                     }
-                 }
-             }
-         });
+          // Aplicar Formato a cada celda (Bucle robusto por índice de columna para asegurar procesamiento de vacías)
+          for (let colNum = 1; colNum <= columnsDef.length; colNum++) {
+              const cell = addedRow.getCell(colNum);
+              cell.alignment = { vertical: 'middle', wrapText: true };
+
+              // Columnas base (Identificadores)
+              if (colNum <= 4) {
+                  cell.font = { color: { argb: 'FF475569' } }; 
+              } 
+              // Columnas de Datos (Línea de tiempo)
+              else {
+                  const pIdx = colNum - 5;
+                  const paso = pasos[pIdx];
+                  const pKey = paso.key;
+                  const valOriginal = rowData[pKey];
+                  const estado = statesDict[pKey];
+
+                  // A. Formato de Valor (Diferenciar Inexistente de Vacío)
+                  if (valOriginal === undefined || valOriginal === null) {
+                      cell.value = '—';
+                      cell.font = { color: { argb: 'FFA1A1AA' }, italic: true }; // Gris tenue
+                  } else if (String(valOriginal).trim() === '') {
+                      cell.value = 'VACÍO';
+                      cell.font = { color: { argb: 'FF94A3B8' }, italic: true }; // Gris pizarra
+                  } else {
+                      cell.value = String(valOriginal); // Asegurar que sea string
+                      cell.font = { color: { argb: 'FF64748B' } }; // Color base
+                  }
+
+                  // B. Aplicar Colores según Estado semántico
+                  if (estado === 'SOBRANTE') {
+                      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_SOBRANTE } };
+                      cell.font = { color: { argb: 'FF92400E' } }; 
+                  } else if (estado === 'DIFERENTE') {
+                      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_DIFERENTE } };
+                      cell.font = { color: { argb: 'FF991B1B' }, bold: true }; 
+                  } else if (estado === 'FALTANTE') {
+                      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_FALTANTE } };
+                      cell.font = { color: { argb: 'FFC2410C' } }; 
+                  } else if (estado === 'IGUAL') {
+                      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_IGUAL } };
+                      cell.font = { color: { argb: 'FF166534' } }; 
+                  }
+              }
+          }
+
       });
 
       // Añadir auto-filtro puro
