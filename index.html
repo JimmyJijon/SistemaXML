@@ -281,8 +281,9 @@
             </div>
           </div>
 
-            <!-- Acciones -->
-          <div class="mt-5 flex justify-end items-center">            <div class="flex gap-3">
+          <!-- Acciones -->
+          <div class="mt-5 flex justify-end items-center">
+            <div class="flex gap-3">
               <button id="btnLimpiar"
                 class="px-6 py-2 rounded text-xs font-bold uppercase text-on-surface-variant hover:bg-surface-container">
                 Limpiar
@@ -306,10 +307,12 @@
           <span class="material-symbols-outlined text-sm">history</span> Historial de Comparaciones
         </h2>
         <div class="flex items-center gap-2">
-          <button id="btnExpandAll" class="text-[10px] font-bold px-3 py-1 rounded bg-surface-container-low border border-outline-variant/30 hover:bg-surface-container transition-all">
+          <button id="btnExpandAll"
+            class="text-[10px] font-bold px-3 py-1 rounded bg-surface-container-low border border-outline-variant/30 hover:bg-surface-container transition-all">
             EXPANDIR TODO
           </button>
-          <button id="btnCollapseAll" class="text-[10px] font-bold px-3 py-1 rounded bg-surface-container-low border border-outline-variant/30 hover:bg-surface-container transition-all">
+          <button id="btnCollapseAll"
+            class="text-[10px] font-bold px-3 py-1 rounded bg-surface-container-low border border-outline-variant/30 hover:bg-surface-container transition-all">
             COLAPSAR TODO
           </button>
         </div>
@@ -375,7 +378,8 @@
       <div class="comparacion-body" style="display: none;">
         <!-- Sección Parámetros -->
         <div class="comparacion-seccion-parametros" data-seccion="parametros">
-          <div class="px-6 py-2 bg-blue-50/50 border-b border-outline-variant/10 flex items-center justify-between cursor-pointer hover:bg-blue-100/50 transition-colors btnToggleSubSeccion">
+          <div
+            class="px-6 py-2 bg-blue-50/50 border-b border-outline-variant/10 flex items-center justify-between cursor-pointer hover:bg-blue-100/50 transition-colors btnToggleSubSeccion">
             <div class="flex items-center gap-4">
               <div class="flex items-center gap-2">
                 <span class="material-symbols-outlined text-xs text-primary">list_alt</span>
@@ -415,7 +419,8 @@
 
         <!-- Sección DataSets -->
         <div class="comparacion-seccion-datasets border-t border-outline-variant/20" data-seccion="datasets">
-          <div class="px-6 py-2 bg-cyan-50/50 border-b border-outline-variant/10 flex items-center justify-between cursor-pointer hover:bg-cyan-100/50 transition-colors btnToggleSubSeccion">
+          <div
+            class="px-6 py-2 bg-cyan-50/50 border-b border-outline-variant/10 flex items-center justify-between cursor-pointer hover:bg-cyan-100/50 transition-colors btnToggleSubSeccion">
             <div class="flex items-center gap-4">
               <div class="flex items-center gap-2">
                 <span class="material-symbols-outlined text-xs text-secondary">database</span>
@@ -481,42 +486,7 @@
     </section>
   </template>
 
-  <!-- Export Options Modal -->
-  <div id="modalExportExcel" class="fixed inset-0 z-[100] hidden items-center justify-center bg-slate-900/40 backdrop-blur-sm">
-    <div class="bg-surface-container-low rounded-xl shadow-2xl overflow-hidden w-full max-w-md border border-outline-variant/30">
-      <div class="px-6 py-4 bg-primary text-white border-b border-primary/20 flex justify-between items-center">
-        <h3 class="font-bold text-sm tracking-wide uppercase flex items-center gap-2">
-          <span class="material-symbols-outlined text-[18px]">table_view</span>
-          Exportar a Excel
-        </h3>
-        <button id="btnCloseModal" class="hover:bg-white/20 p-1 rounded transition-colors text-white">
-          <span class="material-symbols-outlined text-sm">close</span>
-        </button>
-      </div>
-      <div class="p-6">
-        <p class="text-sm text-on-surface-variant font-medium mb-6">
-          ¿Qué tipo de análisis cronológico deseas generar y exportar?
-        </p>
-        <div class="flex flex-col gap-3">
-          <button id="btnExportAllXML" class="w-full text-left p-4 rounded-lg border border-primary/20 bg-primary/5 hover:bg-primary/10 transition-colors flex items-start gap-4 focus:ring-2 focus:ring-primary/40 outline-none">
-            <span class="material-symbols-outlined text-primary text-2xl mt-0.5">history</span>
-            <div>
-              <strong class="block text-primary text-sm font-bold">Toda la Traza XML</strong>
-              <span class="text-xs text-on-surface-variant mt-1 block">Genera una matriz global interpretando <b>todos</b> los eventos cronológicos del archivo cargado.</span>
-            </div>
-          </button>
-          
-          <button id="btnExportUIOnly" class="w-full text-left p-4 rounded-lg border border-outline-variant/50 hover:bg-surface-container transition-colors flex items-start gap-4 focus:ring-2 focus:ring-outline/40 outline-none">
-            <span class="material-symbols-outlined text-secondary text-2xl mt-0.5">dashboard</span>
-            <div>
-              <strong class="block text-secondary text-sm font-bold">Solo la Pantalla Actual</strong>
-              <span class="text-xs text-on-surface-variant mt-1 block">Genera una matriz analizando <b>solo las comparaciones</b> que has ejecutado visualmente en esta interfaz.</span>
-            </div>
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
+
 
 
   <!-- jQuery + Script principal -->

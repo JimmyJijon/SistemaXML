@@ -119,10 +119,10 @@ $(function () {
           // Detectar si es un objeto de Contexto o metadatos
           const firstChild = param.children[0];
           let fcName = (firstChild.localName || firstChild.nodeName).split(':')[1] || firstChild.nodeName;
-          
-          const esContexto = fcName.includes('Context') || 
-                            nameAttr.toLowerCase().includes('context') || 
-                            typeAttr.toLowerCase().includes('context');
+
+          const esContexto = fcName.includes('Context') ||
+            nameAttr.toLowerCase().includes('context') ||
+            typeAttr.toLowerCase().includes('context');
 
           if (esContexto) {
             _aplanar(param, nameAttr || tag);
@@ -258,14 +258,14 @@ $(function () {
             categoria: 'parametros', name: k,
             valA: a.value, valB: null,
             typeA: a.type, typeB: null,
-            status: STATUS.SOBRANTE 
+            status: STATUS.SOBRANTE
           });
         } else {
           resultados.push({
             categoria: 'parametros', name: k,
             valA: null, valB: b.value,
             typeA: null, typeB: b.type,
-            status: STATUS.FALTANTE 
+            status: STATUS.FALTANTE
           });
         }
       });
@@ -491,7 +491,7 @@ $(function () {
       const boLabel = $(this).val();
       $(sId).empty().append('<option value="">— Seleccione Método —</option>');
       _ejecuciones.filter(e => e.boLabel === boLabel || !boLabel).forEach(e => {
-        $(sId).append(`<option value="${e.label}">[${e.globalIndex}] ${e.label}</option>`);
+        $(sId).append(`<option value="${e.globalIndex}">[${e.globalIndex}] ${e.label}</option>`);
       });
     });
 
@@ -504,8 +504,8 @@ $(function () {
     $('#btnComparar').on('click', function () {
       if (!_ejecuciones.length) return _mostrarToast('Carga un archivo XML primero.', true);
 
-      const labelA = $('#selectMetodoA').val();
-      const labelB = $('#selectMetodoB').val();
+      const idA = $('#selectMetodoA').val();
+      const idB = $('#selectMetodoB').val();
       const tipo = $('#tipoComparacion').val();
       const scope = $('#tipoDatoComparado').val();
 
@@ -513,11 +513,14 @@ $(function () {
         return _mostrarToast('Modo de comparación no soportado. Abortando.', true);
       }
 
-      if (!labelA) return _mostrarToast('Selecciona el Método A', true);
-      if (tipo === 'output-vs-input' && !labelB) return _mostrarToast('Selecciona el Método B', true);
+      if (!idA) return _mostrarToast('Selecciona el Método A', true);
+      if (tipo === 'output-vs-input' && !idB) return _mostrarToast('Selecciona el Método B', true);
 
-      const ea = _ejecuciones.find(e => e.label === labelA);
-      const eb = tipo === 'output-vs-input' ? _ejecuciones.find(e => e.label === labelB) : ea;
+      const ea = _ejecuciones.find(e => e.globalIndex == idA);
+      const eb = tipo === 'output-vs-input' ? _ejecuciones.find(e => e.globalIndex == idB) : ea;
+
+      if (!ea) return _mostrarToast('Error: No se encontró la ejecución seleccionada (A).', true);
+      if (tipo === 'output-vs-input' && !eb) return _mostrarToast('Error: No se encontró la ejecución seleccionada (B).', true);
 
       let dataA, dataB, contexto;
       if (tipo === 'input-vs-output') {
@@ -529,7 +532,16 @@ $(function () {
       }
 
       const resul = MotorComparacion.comparar(dataA, dataB, scope);
-      const item = GestorEstado.agregar({ labelA, labelB, tipo, scope, contexto, resultados: resul });
+      const item = GestorEstado.agregar({
+        idEjecucionA: ea.globalIndex,
+        idEjecucionB: eb ? eb.globalIndex : null,
+        labelA: ea.label,
+        labelB: eb ? eb.label : '',
+        tipo,
+        scope,
+        contexto,
+        resultados: resul
+      });
 
       _renderTablas(item);
     });
@@ -604,9 +616,9 @@ $(function () {
             const tableIdClass = `trows-${tname.replace(/[^a-zA-Z0-9]/g, '')}-${Math.random().toString(36).substr(2, 5)}`;
             const relLabel = item.tipo === 'input-vs-output' ? 'Input A → Output A' : 'Output A → Input B';
             // Limpiar nombres de métodos para el tag compacto (quitar prefijos redundantes)
-            const cleanCtx = item.tipo === 'input-vs-output' 
-                ? item.labelA 
-                : `${item.labelA} vs ${item.labelB}`;
+            const cleanCtx = item.tipo === 'input-vs-output'
+              ? item.labelA
+              : `${item.labelA} vs ${item.labelB}`;
 
             tbodyD.append(`
               <tr class="bg-surface-container-low border-b border-outline-variant/30 cursor-pointer hover:bg-surface-container transition-colors btnToggleTabla" data-target="${tableIdClass}">
@@ -762,26 +774,12 @@ $(function () {
       _mostrarToast(`Comparación C${item.seqNum} añadida con éxito.`);
     }
 
-    // Handlers del Modal de Exportación
+    // Handler de Exportación Directa (Solo Pantalla Actual)
     $('#btnExportarExcel').on('click', () => {
       if (!_ejecuciones.length) return _mostrarToast('Carga un archivo XML primero.', true);
-      $('#modalExportExcel').removeClass('hidden').addClass('flex');
-    });
-
-    $('#btnCloseModal').on('click', () => {
-      $('#modalExportExcel').removeClass('flex').addClass('hidden');
-    });
-
-    $('#btnExportAllXML').on('click', () => {
-      $('#modalExportExcel').removeClass('flex').addClass('hidden');
-      _generarYDescargarMatriz('todo');
-    });
-
-    $('#btnExportUIOnly').on('click', () => {
       if (GestorEstado.obtenerTodos().length === 0) {
         return _mostrarToast('No hay comparaciones en la pantalla para exportar.', true);
       }
-      $('#modalExportExcel').removeClass('flex').addClass('hidden');
       _generarYDescargarMatriz('pantalla');
     });
 
@@ -807,28 +805,26 @@ $(function () {
         });
       } else {
         GestorEstado.obtenerTodos().forEach(c => {
-          const ea = _ejecuciones.find(e => e.label === c.labelA);
-          const eb = c.tipo === 'output-vs-input' ? _ejecuciones.find(e => e.label === c.labelB) : ea;
-          
+          const ea = _ejecuciones.find(e => e.globalIndex == c.idEjecucionA);
+          const eb = c.tipo === 'output-vs-input' ? _ejecuciones.find(e => e.globalIndex == c.idEjecucionB) : ea;
+
           let ka, kb, la, lb, da, db;
+          // Usamos el ID de la comparación en la key para permitir redundancia (pasos repetidos en bloques distintos)
           if (c.tipo === 'input-vs-output') {
-              ka = `I_${ea.globalIndex}`; da = ea.input; la = `[${ea.globalIndex}] In: ${ea.metodo}`;
-              kb = `O_${ea.globalIndex}`; db = ea.output; lb = `[${ea.globalIndex}] Out: ${ea.metodo}`;
+            ka = `I_${ea.globalIndex}_${c.seqNum}`; da = ea.input; la = `[C${c.seqNum}] [${ea.globalIndex}] In: ${ea.metodo}`;
+            kb = `O_${ea.globalIndex}_${c.seqNum}`; db = ea.output; lb = `[C${c.seqNum}] [${ea.globalIndex}] Out: ${ea.metodo}`;
           } else {
-              ka = `O_${ea.globalIndex}`; da = ea.output; la = `[${ea.globalIndex}] Out: ${ea.metodo}`;
-              kb = `I_${eb.globalIndex}`; db = eb.input; lb = `[${eb.globalIndex}] In: ${eb.metodo}`;
+            ka = `O_${ea.globalIndex}_${c.seqNum}`; da = ea.output; la = `[C${c.seqNum}] [${ea.globalIndex}] Out: ${ea.metodo}`;
+            kb = `I_${eb.globalIndex}_${c.seqNum}`; db = eb.input; lb = `[C${c.seqNum}] [${eb.globalIndex}] In: ${eb.metodo}`;
           }
 
-          if (!_pasosKeySet.has(ka)) { _pasosKeySet.add(ka); pasos.push({ key: ka, label: la, data: da }); }
-          if (!_pasosKeySet.has(kb)) { _pasosKeySet.add(kb); pasos.push({ key: kb, label: lb, data: db }); }
+          pasos.push({ key: ka, label: la, data: da });
+          pasos.push({ key: kb, label: lb, data: db });
         });
-        
-        pasos.sort((a,b) => {
-           const [tA, idxA] = a.key.split('_');
-           const [tB, idxB] = b.key.split('_');
-           if (idxA !== idxB) return parseInt(idxA) - parseInt(idxB);
-           return tA === 'I' ? -1 : 1; 
-        });
+
+        // NO ORDENAR: Preservar el orden de las comparaciones C1, C2, C3 tal cual están en la UI
+        // pasos.sort((a,b) => { ... }); 
+
       }
 
       // 2. Extraer Nodos Únicos (Filas)
@@ -838,7 +834,7 @@ $(function () {
           const fKey = `PARAM|||${pName}`;
           if (!filasMapa.has(fKey)) filasMapa.set(fKey, { c: 'Parámetros o Sistema', t: '-', r: '-', f: pName });
         });
-        
+
         paso.data.datasets.forEach((tblMap, dsName) => {
           tblMap.forEach((rows, tblName) => {
             rows.forEach(row => {
@@ -872,7 +868,7 @@ $(function () {
       ];
 
       pasos.forEach(p => {
-         columnsDef.push({ header: p.label, key: p.key, width: 26 });
+        columnsDef.push({ header: p.label, key: p.key, width: 26 });
       });
 
       worksheet.columns = columnsDef;
@@ -881,7 +877,7 @@ $(function () {
       worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
       worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F2937' } }; // Gris muy oscuro
       worksheet.getRow(1).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-      
+
       // Congelar paneles: 1 fila de header y 4 columnas de identificadores
       worksheet.views = [{ state: 'frozen', xSplit: 4, ySplit: 1 }];
 
@@ -892,117 +888,117 @@ $(function () {
       const COLOR_FALTANTE = 'FFFFF7ED';  // Naranja claro (Faltante)
 
       filasMapa.forEach((meta, fKey) => {
-         const rowData = { cat: meta.c, tbl: meta.t, pk: String(meta.r).substring(0,50), nodo: meta.f };
-         const statesDict = {}; 
-         let lastValue = undefined;
+        const rowData = { cat: meta.c, tbl: meta.t, pk: String(meta.r).substring(0, 50), nodo: meta.f };
+        const statesDict = {};
+        let lastValue = undefined;
 
-         for (let i = 0; i < pasos.length; i++) {
-            const paso = pasos[i];
-            let currVal = undefined;
-            
-            // Extraer valor temporal
-            if (fKey.startsWith('PARAM')) {
-               const pObj = paso.data.parametros.get(meta.f);
-               if (pObj) currVal = pObj.value;
-            } else {
-               paso.data.datasets.forEach((tblMap, dsName) => {
-                  const rows = tblMap.get(meta.t);
-                  if (rows) {
-                     const r = rows.find(fila => {
-                         let tempK = '-';
-                         for (const pk of EPICOR_PK_FIELDS) {
-                           if (fila[pk] !== undefined && fila[pk] !== null && fila[pk] !== '') {
-                             tempK = `${pk}=${fila[pk]}`; break;
-                           }
-                         }
-                         if (tempK === '-') tempK = Object.entries(fila).map(([k, v]) => `${k}=${v}`).join('|');
-                         return tempK === meta.r;
-                     });
-                     if (r && r[meta.f] !== undefined) currVal = r[meta.f];
+        for (let i = 0; i < pasos.length; i++) {
+          const paso = pasos[i];
+          let currVal = undefined;
+
+          // Extraer valor temporal
+          if (fKey.startsWith('PARAM')) {
+            const pObj = paso.data.parametros.get(meta.f);
+            if (pObj) currVal = pObj.value;
+          } else {
+            paso.data.datasets.forEach((tblMap, dsName) => {
+              const rows = tblMap.get(meta.t);
+              if (rows) {
+                const r = rows.find(fila => {
+                  let tempK = '-';
+                  for (const pk of EPICOR_PK_FIELDS) {
+                    if (fila[pk] !== undefined && fila[pk] !== null && fila[pk] !== '') {
+                      tempK = `${pk}=${fila[pk]}`; break;
+                    }
                   }
-               });
-            }
-
-            // Guardar valor para la columna (preservamos undefined para diferenciar de vacío)
-            rowData[paso.key] = currVal;
-
-            // Logica estructural para el color
-            let estado = '';
-            const norm = v => {
-                if (v === null || v === undefined) return '';
-                const s = String(v).trim();
-                const n = parseFloat(s);
-                return (!isNaN(n) && String(n) === s) ? n : s;
-            };
-
-            if (i > 0) {
-               if (currVal !== undefined && lastValue !== undefined) {
-                   estado = (norm(currVal) === norm(lastValue)) ? 'IGUAL' : 'DIFERENTE';
-               } else if (currVal !== undefined && lastValue === undefined) {
-                   estado = 'FALTANTE'; // B tiene el dato, pero A no lo envió
-               } else if (currVal === undefined && lastValue !== undefined) {
-                   estado = 'SOBRANTE'; // A envió el dato, pero B no lo tiene
-               }
-            }
-            
-            statesDict[paso.key] = estado;
-            lastValue = currVal; 
-         }
-
-         const addedRow = worksheet.addRow(rowData);
-         
-          // Aplicar Formato a cada celda (Bucle robusto por índice de columna para asegurar procesamiento de vacías)
-          for (let colNum = 1; colNum <= columnsDef.length; colNum++) {
-              const cell = addedRow.getCell(colNum);
-              cell.alignment = { vertical: 'middle', wrapText: true };
-
-              // Columnas base (Identificadores)
-              if (colNum <= 4) {
-                  cell.font = { color: { argb: 'FF475569' } }; 
-              } 
-              // Columnas de Datos (Línea de tiempo)
-              else {
-                  const pIdx = colNum - 5;
-                  const paso = pasos[pIdx];
-                  const pKey = paso.key;
-                  const valOriginal = rowData[pKey];
-                  const estado = statesDict[pKey];
-
-                  // A. Formato de Valor (Diferenciar Inexistente de Vacío)
-                  if (valOriginal === undefined || valOriginal === null) {
-                      cell.value = '—';
-                      cell.font = { color: { argb: 'FFA1A1AA' }, italic: true }; // Gris tenue
-                  } else if (String(valOriginal).trim() === '') {
-                      cell.value = 'VACÍO';
-                      cell.font = { color: { argb: 'FF94A3B8' }, italic: true }; // Gris pizarra
-                  } else {
-                      cell.value = String(valOriginal); // Asegurar que sea string
-                      cell.font = { color: { argb: 'FF64748B' } }; // Color base
-                  }
-
-                  // B. Aplicar Colores según Estado semántico
-                  if (estado === 'SOBRANTE') {
-                      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_SOBRANTE } };
-                      cell.font = { color: { argb: 'FF92400E' } }; 
-                  } else if (estado === 'DIFERENTE') {
-                      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_DIFERENTE } };
-                      cell.font = { color: { argb: 'FF991B1B' }, bold: true }; 
-                  } else if (estado === 'FALTANTE') {
-                      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_FALTANTE } };
-                      cell.font = { color: { argb: 'FFC2410C' } }; 
-                  } else if (estado === 'IGUAL') {
-                      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_IGUAL } };
-                      cell.font = { color: { argb: 'FF166534' } }; 
-                  }
+                  if (tempK === '-') tempK = Object.entries(fila).map(([k, v]) => `${k}=${v}`).join('|');
+                  return tempK === meta.r;
+                });
+                if (r && r[meta.f] !== undefined) currVal = r[meta.f];
               }
+            });
           }
+
+          // Guardar valor para la columna (preservamos undefined para diferenciar de vacío)
+          rowData[paso.key] = currVal;
+
+          // Logica estructural para el color
+          let estado = '';
+          const norm = v => {
+            if (v === null || v === undefined) return '';
+            const s = String(v).trim();
+            const n = parseFloat(s);
+            return (!isNaN(n) && String(n) === s) ? n : s;
+          };
+
+          if (i > 0) {
+            if (currVal !== undefined && lastValue !== undefined) {
+              estado = (norm(currVal) === norm(lastValue)) ? 'IGUAL' : 'DIFERENTE';
+            } else if (currVal !== undefined && lastValue === undefined) {
+              estado = 'FALTANTE'; // B tiene el dato, pero A no lo envió
+            } else if (currVal === undefined && lastValue !== undefined) {
+              estado = 'SOBRANTE'; // A envió el dato, pero B no lo tiene
+            }
+          }
+
+          statesDict[paso.key] = estado;
+          lastValue = currVal;
+        }
+
+        const addedRow = worksheet.addRow(rowData);
+
+        // Aplicar Formato a cada celda (Bucle robusto por índice de columna para asegurar procesamiento de vacías)
+        for (let colNum = 1; colNum <= columnsDef.length; colNum++) {
+          const cell = addedRow.getCell(colNum);
+          cell.alignment = { vertical: 'middle', wrapText: true };
+
+          // Columnas base (Identificadores)
+          if (colNum <= 4) {
+            cell.font = { color: { argb: 'FF475569' } };
+          }
+          // Columnas de Datos (Línea de tiempo)
+          else {
+            const pIdx = colNum - 5;
+            const paso = pasos[pIdx];
+            const pKey = paso.key;
+            const valOriginal = rowData[pKey];
+            const estado = statesDict[pKey];
+
+            // A. Formato de Valor (Diferenciar Inexistente de Vacío)
+            if (valOriginal === undefined || valOriginal === null) {
+              cell.value = '—';
+              cell.font = { color: { argb: 'FFA1A1AA' }, italic: true }; // Gris tenue
+            } else if (String(valOriginal).trim() === '') {
+              cell.value = 'VACÍO';
+              cell.font = { color: { argb: 'FF94A3B8' }, italic: true }; // Gris pizarra
+            } else {
+              cell.value = String(valOriginal); // Asegurar que sea string
+              cell.font = { color: { argb: 'FF64748B' } }; // Color base
+            }
+
+            // B. Aplicar Colores según Estado semántico
+            if (estado === 'SOBRANTE') {
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_SOBRANTE } };
+              cell.font = { color: { argb: 'FF92400E' } };
+            } else if (estado === 'DIFERENTE') {
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_DIFERENTE } };
+              cell.font = { color: { argb: 'FF991B1B' }, bold: true };
+            } else if (estado === 'FALTANTE') {
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_FALTANTE } };
+              cell.font = { color: { argb: 'FFC2410C' } };
+            } else if (estado === 'IGUAL') {
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_IGUAL } };
+              cell.font = { color: { argb: 'FF166534' } };
+            }
+          }
+        }
 
       });
 
       // Añadir auto-filtro puro
       worksheet.autoFilter = {
-         from: { row: 1, column: 1 },
-         to: { row: 1, column: columnsDef.length }
+        from: { row: 1, column: 1 },
+        to: { row: 1, column: columnsDef.length }
       };
 
       // 4. Descargar Buffer
@@ -1012,7 +1008,7 @@ $(function () {
         const docName = `TrazaEpicor_MapaCalor_${modo === 'todo' ? 'Global' : 'Parcial'}_${Date.now()}.xlsx`;
         saveAs(blob, docName);
         _mostrarToast(`¡Mapa de Calor Excel descargado!`);
-      } catch(err) {
+      } catch (err) {
         _mostrarToast(`Error generando Excel: ${err.message}`, true);
         console.error(err);
       }
