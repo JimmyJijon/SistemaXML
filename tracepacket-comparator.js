@@ -16,10 +16,12 @@ $(function () {
     'SysRowID', 'JobNum', 'OrderNum', 'OrderLine', 'OrderRelNum',
     'PONum', 'POLine', 'PORelNum', 'QuoteNum', 'QuoteLine',
     'AssemblySeq', 'OprSeq', 'PartNum', 'CustNum', 'VendorNum',
-    'Company'
+    'Company',
+    // Llaves de almacén/inventario (diferencian registros dentro de PartWhse, PartBin, etc.)
+    'WarehouseCode', 'Plant', 'UOMCode', 'BinNum'
   ];
 
-  const BO_IGNORADOS = ['Ice.Proxy.BO.ReportMonitorImpl'];
+  const BO_IGNORADOS = ['Ice.Proxy.BO.ReportMonitorImpl', 'Ice.Proxy.Lib.BOReaderImpl'];
 
   // ==========================================
   // XmlParser
@@ -227,14 +229,24 @@ $(function () {
     }
 
     function buildRecordKey(row) {
-      // Buscar la primera clave primaria válida en orden
-      for (const pk of EPICOR_PK_FIELDS) {
-        if (row[pk] !== undefined && row[pk] !== null && row[pk] !== '') {
-          return `${pk}=${row[pk]}`;
-        }
-      }
-      // Hash backup de todos los campos
-      return Object.entries(row).map(([k, v]) => `${k}=${v}`).join('|');
+      // Campos técnicos que NO deben participar en la clave de negocio,
+      // ya que varían entre métodos (GetNew vs Update) y causan falsos SOBRANTE/FALTANTE.
+      const TECHNICAL_FIELDS = new Set(['SysRowID', 'SysRevID', 'RowMod', 'BitFlag']);
+
+      // Construir clave COMPUESTA con TODOS los campos de negocio presentes en la fila.
+      // Antes se detenía en el primero (ej: Company=PLA01), haciendo que todos los
+      // registros de PartWhse colisionaran en el Map y se sobreescribieran.
+      const parts = EPICOR_PK_FIELDS
+        .filter(pk => !TECHNICAL_FIELDS.has(pk) && row[pk] !== undefined && row[pk] !== null && row[pk] !== '')
+        .map(pk => `${pk}=${row[pk]}`);
+
+      if (parts.length > 0) return parts.join('|');
+
+      // Fallback: hash de todos los campos no-técnicos cuando no hay PK de negocio clara
+      return Object.entries(row)
+        .filter(([k]) => !TECHNICAL_FIELDS.has(k))
+        .map(([k, v]) => `${k}=${v}`)
+        .join('|');
     }
 
     function compararParametros(mapA, mapB) {
@@ -313,17 +325,34 @@ $(function () {
         const rowsA = tbA ? tbA.rows : [];
         const rowsB = tbB ? tbB.rows : [];
 
-        const mapA = new Map(), mapB = new Map();
-        rowsA.forEach(r => mapA.set(buildRecordKey(r), r));
-        rowsB.forEach(r => mapB.set(buildRecordKey(r), r));
+        if (rowsA.length > 0 && rowsB.length === 0) {
+          // Solo A -> Todo SOBRANTE
+          rowsA.forEach((rowA, i) => {
+            const rKey = rowsA.length === 1 ? tblName : `A[${i}]`;
+            Object.keys(rowA).forEach(f => {
+              resultados.push({
+                categoria: 'datasets', tblName, dsNameA: tbA?.dsName, dsNameB: null,
+                recordKey: rKey, fieldName: f, valA: rowA[f], valB: null, status: STATUS.SOBRANTE
+              });
+            });
+          });
+        } else if (rowsA.length === 0 && rowsB.length > 0) {
+          // Solo B -> Todo FALTANTE
+          rowsB.forEach((rowB, j) => {
+            const rKey = rowsB.length === 1 ? tblName : `B[${j}]`;
+            Object.keys(rowB).forEach(f => {
+              resultados.push({
+                categoria: 'datasets', tblName, dsNameA: null, dsNameB: tbB?.dsName,
+                recordKey: rKey, fieldName: f, valA: null, valB: rowB[f], status: STATUS.FALTANTE
+              });
+            });
+          });
+        } else if (rowsA.length > 0 && rowsB.length > 0) {
+          const nA = rowsA.length;
+          const nB = rowsB.length;
 
-        const keys = new Set([...mapA.keys(), ...mapB.keys()]);
-
-        keys.forEach(k => {
-          const rowA = mapA.get(k);
-          const rowB = mapB.get(k);
-
-          if (rowA && rowB) {
+          // Helper: compara un rowA contra un rowB y empuja resultados
+          const compararPar = (rowA, rowB, rKey) => {
             const fields = new Set([...Object.keys(rowA), ...Object.keys(rowB)]);
             fields.forEach(f => {
               const va = rowA[f];
@@ -338,25 +367,30 @@ $(function () {
               }
               resultados.push({
                 categoria: 'datasets', tblName, dsNameA: tbA?.dsName, dsNameB: tbB?.dsName,
-                recordKey: k, fieldName: f, valA: va, valB: vb, status: st
+                recordKey: rKey, fieldName: f, valA: va, valB: vb, status: st
               });
             });
-          } else if (rowA) {
-            Object.keys(rowA).forEach(f => {
-              resultados.push({
-                categoria: 'datasets', tblName, dsNameA: tbA?.dsName, dsNameB: null,
-                recordKey: k, fieldName: f, valA: rowA[f], valB: null, status: STATUS.SOBRANTE
-              });
+          };
+
+          if (nA === 1 && nB === 1) {
+            // MODO 1: Un solo registro en cada lado → comparación directa plana (sin índices)
+            compararPar(rowsA[0], rowsB[0], tblName);
+
+          } else if (nA === nB) {
+            // MODO 2: Misma cantidad → emparejamiento 1-a-1 por posición (A[i] ↔ B[i])
+            rowsA.forEach((rowA, i) => {
+              compararPar(rowA, rowsB[i], `A[${i}] ↔ B[${i}]`);
             });
+
           } else {
-            Object.keys(rowB).forEach(f => {
-              resultados.push({
-                categoria: 'datasets', tblName, dsNameA: null, dsNameB: tbB?.dsName,
-                recordKey: k, fieldName: f, valA: null, valB: rowB[f], status: STATUS.FALTANTE
+            // MODO 3: Cantidades distintas → Producto Cartesiano (A[i] ↔ B[j])
+            rowsA.forEach((rowA, i) => {
+              rowsB.forEach((rowB, j) => {
+                compararPar(rowA, rowB, `A[${i}] ↔ B[${j}]`);
               });
             });
           }
-        });
+        }
       });
 
       return resultados;
@@ -648,20 +682,49 @@ $(function () {
               </tr>
             `);
 
+            const numRegistros = filas.size;
+
             filas.forEach((campos, rkey) => {
-              const sorteados = campos.sort((a, b) => {
+              // 1) Si hay múltiples registros (Cartesiano/1-a-1 indexado), evitamos ordenar para preservar el orden XML original
+              const sorteados = numRegistros > 1 ? campos : campos.sort((a, b) => {
                 const s1 = a.status === STATUS.IGUAL ? 1 : 0;
                 const s2 = b.status === STATUS.IGUAL ? 1 : 0;
                 return s1 - s2;
               });
+
+              const blockId = `block_${Math.random().toString(36).substr(2, 9)}`;
+
+              // ── Separador visual de Registro (solo cuando hay múltiples registros) ──
+              if (numRegistros > 1) {
+                const todosSob = campos.every(c => c.status === STATUS.SOBRANTE);
+                const todosFal = campos.every(c => c.status === STATUS.FALTANTE);
+                const rkeyLabel = rkey.replace(/\|/g, ' · ');
+                const recBadge = todosSob
+                  ? `<span class="px-1.5 py-0.5 rounded text-[8px] font-bold bg-amber-100 text-amber-700 uppercase">Solo A (Sobrante)</span>`
+                  : todosFal
+                  ? `<span class="px-1.5 py-0.5 rounded text-[8px] font-bold bg-orange-100 text-orange-700 uppercase">Solo B (Faltante)</span>`
+                  : `<span class="px-1.5 py-0.5 rounded text-[8px] font-bold bg-blue-50 text-blue-600 uppercase">Comparando</span>`;
+
+                tbodyD.append(`
+                  <tr class="border-t-2 border-slate-200 bg-slate-50 ${tableIdClass} cursor-pointer hover:bg-slate-100 transition-colors btnToggleRecord" data-record-header="true" data-target="${blockId}" style="display:none;">
+                    <td colspan="4" class="px-6 py-1 pl-8">
+                      <div class="flex items-center gap-2">
+                        <span class="material-symbols-outlined text-[15px] text-slate-500 toggle-icon">expand_more</span>
+                        <span class="text-[10px] font-bold font-mono text-slate-700 truncate" title="${_escapar(rkeyLabel)}">${_escapar(rkeyLabel)}</span>
+                        ${recBadge}
+                      </div>
+                    </td>
+                  </tr>
+                `);
+              }
 
               sorteados.forEach(c => {
                 // Filtro de campos técnicos de Epicor
                 if (['SysRowID', 'RowMod', 'SysRevID'].includes(c.fieldName)) return;
 
                 tbodyD.append(`
-                  <tr class="border-b border-outline-variant/10 hover:bg-surface-container-low transition-colors data-${c.status} ${tableIdClass}" data-estado="${c.status}" style="display:none;">
-                    <td class="px-6 py-1.5 pl-10 text-[11px] font-mono font-medium truncate" title="${_escapar(c.fieldName)}">${_escapar(c.fieldName)}</td>
+                  <tr class="border-b border-outline-variant/10 hover:bg-surface-container-low transition-colors data-${c.status} ${tableIdClass} ${numRegistros > 1 ? blockId : ''}" data-estado="${c.status}" style="display:none;">
+                    <td class="px-6 py-1.5 pl-12 text-[11px] font-mono font-medium truncate" title="${_escapar(c.fieldName)}">${_escapar(c.fieldName)}</td>
                     <td class="px-6 py-1.5 break-all overflow-hidden">${_formatoValor(c.valA)}</td>
                     <td class="px-6 py-1.5 break-all overflow-hidden">${_formatoValor(c.valB)}</td>
                     <td class="px-6 py-1.5">${_badge(c.status)}</td>
@@ -703,14 +766,31 @@ $(function () {
         e.stopPropagation();
       });
 
+      $b.find('.btnToggleRecord').on('click', function(e) {
+        e.stopPropagation();
+        const tgt = $(this).attr('data-target');
+        const rows = $b.find(`.${tgt}`);
+        const isCollapsed = $(this).data('collapsed');
+        
+        if (isCollapsed) {
+          rows.removeClass('local-collapsed').css('display', 'table-row').hide().fadeIn(200);
+          $(this).find('.toggle-icon').text('expand_more');
+          $(this).data('collapsed', false);
+        } else {
+          rows.addClass('local-collapsed').fadeOut(200);
+          $(this).find('.toggle-icon').text('chevron_right');
+          $(this).data('collapsed', true);
+        }
+      });
+
       $b.find('.btnToggleTabla').on('click', function () {
         const tgt = $(this).attr('data-target');
         const rows = $b.find(`.${tgt}`);
         const isHidden = rows.first().is(':hidden');
 
         if (isHidden) {
-          // Asegurar display: table-row para evitar descuadres en layout fijo
-          rows.css('display', 'table-row').hide().fadeIn(250);
+          // Al expandir la tabla principal, no mostramos los que fueron colapsados individualmente
+          rows.not('.local-collapsed').css('display', 'table-row').hide().fadeIn(250);
           $(this).find('.toggle-icon').text('expand_less');
         } else {
           rows.fadeOut(200);
@@ -731,6 +811,8 @@ $(function () {
         const tgtClass = $(this).attr('data-target');
 
         $b.find('.' + tgtClass).each(function () {
+          // Las filas separadoras de registro nunca se ocultan por estado
+          if ($(this).data('record-header')) return;
           const isMatch = (val === 'todos' || $(this).attr('data-estado') === val);
           $(this).toggleClass('filtered-out', !isMatch);
         });
@@ -794,6 +876,17 @@ $(function () {
       const workbook = new ExcelJS.Workbook();
       const worksheet = workbook.addWorksheet('Matriz Traza');
 
+      // Helper local: genera la misma clave compuesta que MotorComparacion.buildRecordKey.
+      // Excluye campos técnicos que varían entre GetNew y Update, garantizando el match correcto.
+      const _TECH = new Set(['SysRowID', 'SysRevID', 'RowMod', 'BitFlag']);
+      function _buildExcelKey(row) {
+        const parts = EPICOR_PK_FIELDS
+          .filter(pk => !_TECH.has(pk) && row[pk] !== undefined && row[pk] !== null && row[pk] !== '')
+          .map(pk => `${pk}=${row[pk]}`);
+        if (parts.length > 0) return parts.join('|');
+        return Object.entries(row).filter(([k]) => !_TECH.has(k)).map(([k, v]) => `${k}=${v}`).join('|');
+      }
+
       // 1. Construir Línea de Tiempo (Columnas)
       const pasos = [];
       const _pasosKeySet = new Set();
@@ -838,13 +931,7 @@ $(function () {
         paso.data.datasets.forEach((tblMap, dsName) => {
           tblMap.forEach((rows, tblName) => {
             rows.forEach(row => {
-              let rKey = '-';
-              for (const pk of EPICOR_PK_FIELDS) {
-                if (row[pk] !== undefined && row[pk] !== null && row[pk] !== '') {
-                  rKey = `${pk}=${row[pk]}`; break;
-                }
-              }
-              if (rKey === '-') rKey = Object.entries(row).map(([k, v]) => `${k}=${v}`).join('|');
+              const rKey = _buildExcelKey(row);
 
               Object.keys(row).forEach(fName => {
                 const fKey = `DS|${tblName}|${rKey}|${fName}`;
@@ -905,14 +992,7 @@ $(function () {
               const rows = tblMap.get(meta.t);
               if (rows) {
                 const r = rows.find(fila => {
-                  let tempK = '-';
-                  for (const pk of EPICOR_PK_FIELDS) {
-                    if (fila[pk] !== undefined && fila[pk] !== null && fila[pk] !== '') {
-                      tempK = `${pk}=${fila[pk]}`; break;
-                    }
-                  }
-                  if (tempK === '-') tempK = Object.entries(fila).map(([k, v]) => `${k}=${v}`).join('|');
-                  return tempK === meta.r;
+                  return _buildExcelKey(fila) === meta.r;
                 });
                 if (r && r[meta.f] !== undefined) currVal = r[meta.f];
               }
