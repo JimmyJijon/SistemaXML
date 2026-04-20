@@ -21,7 +21,7 @@ $(function () {
     'WarehouseCode', 'Plant', 'UOMCode', 'BinNum'
   ];
 
-  const BO_IGNORADOS = ['Ice.Proxy.BO.ReportMonitorImpl', 'Ice.Proxy.Lib.BOReaderImpl'];
+  const BO_IGNORADOS = ['Ice.Proxy.BO.ReportMonitorImpl', 'Ice.Proxy.Lib.BOReaderImpl', 'Ice.Proxy.BO.DocTypeImpl', 'Ice.Proxy.BO.XDocTypeCtrlImpl'];
 
   // ==========================================
   // XmlParser
@@ -604,7 +604,10 @@ $(function () {
       const tbodyD = $b.find('.tbodyDatasets');
 
       if (item.scope !== 'datasets') {
+        const cp = { igual: 0, diferente: 0, sobrante: 0, faltante: 0, todos: 0 };
         item.resultados.parametros.forEach(r => {
+          cp.todos++;
+          if(cp[r.status] !== undefined) cp[r.status]++;
           tbodyP.append(`
             <tr class="border-b border-outline-variant/10 hover:bg-surface-container-low transition-colors data-${r.status}" data-estado="${r.status}">
               <td class="px-6 py-2 pl-10 font-mono text-xs truncate" title="${_escapar(r.name)}">${_escapar(r.name)} <span class="text-[9px] text-gray-500">${r.typeA || r.typeB}</span></td>
@@ -614,18 +617,38 @@ $(function () {
             </tr>
           `);
         });
+
+        const selP = $b.find('.filtro-estado[data-seccion="parametros"]');
+        selP.find('option[value="todos"]').text(`Todos los estados (${cp.todos})`);
+        selP.find('option[value="igual"]').text(`Igual (${cp.igual})`);
+        selP.find('option[value="diferente"]').text(`Diferente (${cp.diferente})`);
+        selP.find('option[value="sobrante"]').text(`Sobrante (${cp.sobrante})`);
+        selP.find('option[value="faltante"]').text(`Faltante (${cp.faltante})`);
+
         if (!item.resultados.parametros.length) tbodyP.append('<tr><td colspan="4" class="text-center p-4 text-xs italic text-gray-400">Sin parámetros procesados.</td></tr>');
       } else {
         $b.find('.comparacion-seccion-parametros').hide();
       }
 
       if (item.scope !== 'parametros') {
+        const cd = { igual: 0, diferente: 0, sobrante: 0, faltante: 0, todos: 0 };
         const tbm = new Map();
         item.resultados.datasets.forEach(r => {
+          if (!['SysRowID', 'RowMod', 'SysRevID'].includes(r.fieldName)) {
+            cd.todos++;
+            if (cd[r.status] !== undefined) cd[r.status]++;
+          }
           if (!tbm.has(r.tblName)) tbm.set(r.tblName, new Map());
           if (!tbm.get(r.tblName).has(r.recordKey)) tbm.get(r.tblName).set(r.recordKey, []);
           tbm.get(r.tblName).get(r.recordKey).push(r);
         });
+
+        const selD = $b.find('.filtro-estado[data-seccion="datasets"]');
+        selD.find('option[value="todos"]').text(`Todos los estados (${cd.todos})`);
+        selD.find('option[value="igual"]').text(`Igual (${cd.igual})`);
+        selD.find('option[value="diferente"]').text(`Diferente (${cd.diferente})`);
+        selD.find('option[value="sobrante"]').text(`Sobrante (${cd.sobrante})`);
+        selD.find('option[value="faltante"]').text(`Faltante (${cd.faltante})`);
 
         if (tbm.size === 0) {
           tbodyD.append('<tr><td colspan="4" class="text-center p-4 text-xs italic text-gray-400">Sin DataSets encontrados.</td></tr>');
@@ -654,6 +677,16 @@ $(function () {
               ? item.labelA
               : `${item.labelA} vs ${item.labelB}`;
 
+            // Generar conteo local excluyendo campos técnicos
+            const ct = { igual: 0, diferente: 0, sobrante: 0, faltante: 0, todos: 0 };
+            filas.forEach(campos => {
+              campos.forEach(c => {
+                if (['SysRowID', 'RowMod', 'SysRevID'].includes(c.fieldName)) return;
+                ct.todos++;
+                if (ct[c.status] !== undefined) ct[c.status]++;
+              });
+            });
+
             tbodyD.append(`
               <tr class="bg-surface-container-low border-b border-outline-variant/30 cursor-pointer hover:bg-surface-container transition-colors btnToggleTabla" data-target="${tableIdClass}">
                 <td colspan="4" class="px-6 pt-5 pb-3 text-on-surface">
@@ -668,11 +701,11 @@ $(function () {
                       </div>
                       <div class="flex items-center gap-3">
                         <select class="filtro-estado-tabla bg-white text-[#334155] border border-[#cbd5e1] rounded pl-2 pr-6 py-0.5 text-[10px] font-bold uppercase cursor-pointer hover:border-secondary outline-none focus:ring-1 focus:ring-secondary/30 transition-colors" data-target="${tableIdClass}">
-                          <option value="todos">Todos los estados</option>
-                          <option value="igual">Igual</option>
-                          <option value="diferente">Diferente</option>
-                          <option value="sobrante">Sobrante</option>
-                          <option value="faltante">Faltante</option>
+                          <option value="todos">Todos los estados (${ct.todos})</option>
+                          <option value="igual">Igual (${ct.igual})</option>
+                          <option value="diferente">Diferente (${ct.diferente})</option>
+                          <option value="sobrante">Sobrante (${ct.sobrante})</option>
+                          <option value="faltante">Faltante (${ct.faltante})</option>
                         </select>
                         <span class="material-symbols-outlined text-sm text-primary/50 toggle-icon">expand_more</span>
                       </div>
@@ -685,12 +718,8 @@ $(function () {
             const numRegistros = filas.size;
 
             filas.forEach((campos, rkey) => {
-              // 1) Si hay múltiples registros (Cartesiano/1-a-1 indexado), evitamos ordenar para preservar el orden XML original
-              const sorteados = numRegistros > 1 ? campos : campos.sort((a, b) => {
-                const s1 = a.status === STATUS.IGUAL ? 1 : 0;
-                const s2 = b.status === STATUS.IGUAL ? 1 : 0;
-                return s1 - s2;
-              });
+              // 1) Preservamos 100% el orden cronológico original del XML y descartamos cualquier manipulación previa de sort()
+              const sorteados = campos;
 
               const blockId = `block_${Math.random().toString(36).substr(2, 9)}`;
 
