@@ -28,10 +28,42 @@ $(function () {
   // ==========================================
   const XmlParser = (function () {
 
+    function _buildLineMap(rawStr) {
+      // Returns a function: charOffset => lineNumber (1-indexed)
+      const offsets = [0]; // offset 0 is line 1
+      for (let i = 0; i < rawStr.length; i++) {
+        if (rawStr[i] === '\n') offsets.push(i + 1);
+      }
+      return function (offset) {
+        let lo = 0, hi = offsets.length - 1;
+        while (lo < hi) {
+          const mid = (lo + hi + 1) >> 1;
+          if (offsets[mid] <= offset) lo = mid; else hi = mid - 1;
+        }
+        return lo + 1;
+      };
+    }
+
+    function _injectLineAttrs(xmlStr, lineOf) {
+      // Inject data-line="N" into every opening tag (not self-closing handled separately)
+      // We match every < followed by a letter (not </ <? <!)
+      return xmlStr.replace(/<([A-Za-z][^>]*?)(\/?>)/g, function (match, inner, closing, offset) {
+        // Avoid double-injecting
+        if (inner.indexOf('data-line=') !== -1) return match;
+        const ln = lineOf(offset);
+        return `<${inner} data-line="${ln}"${closing}`;
+      });
+    }
+
     function parsearXML(xmlString) {
       // Remover cabeceras XML que rompan el parsing sin un wrapper global y encerrar todo
       const raw = xmlString.trim().replace(/<\?xml[^?]*\?>/gi, '').trim();
-      const wrapped = `<root>${raw}</root>`;
+
+      // Build line-number lookup BEFORE wrapping (the wrapper adds 6 chars `<root>` at offset 0)
+      const lineOf = _buildLineMap(raw);
+      const withLines = _injectLineAttrs(raw, lineOf);
+
+      const wrapped = `<root>${withLines}</root>`;
       const doc = new DOMParser().parseFromString(wrapped, 'application/xml');
 
       if (doc.querySelector('parsererror')) {
@@ -99,6 +131,7 @@ $(function () {
 
         const nameAttr = $(param).attr('name') || '';
         const typeAttr = $(param).attr('type') || '';
+        const lineParam = parseInt(param.getAttribute('data-line') || '0', 10) || null;
 
         // Función auxiliar recursiva para aplanar nodos
         function _aplanar(node, currentPath) {
@@ -106,7 +139,8 @@ $(function () {
           if (children.length === 0) {
             // Nodo hoja: guardar valor
             const val = $(node).text().trim();
-            mapa.set(currentPath, { name: currentPath, type: typeAttr, value: val });
+            const ln = parseInt(node.getAttribute('data-line') || '0', 10) || lineParam;
+            mapa.set(currentPath, { name: currentPath, type: typeAttr, value: val, line: ln });
           } else {
             // Nodo con hijos: navegar
             children.forEach(child => {
@@ -130,13 +164,12 @@ $(function () {
             _aplanar(param, nameAttr || tag);
           }
           // Si es un DataSet de negocio real, NO aplanamos aquí.
-          // Se deja para que lo procese extraerDatasets() y se vea en las tablas inferiores.
           return;
         }
 
         // Parámetro simple (llave/valor)
         const val = $(param).text().trim();
-        if (nameAttr) mapa.set(nameAttr, { name: nameAttr, type: typeAttr, value: val });
+        if (nameAttr) mapa.set(nameAttr, { name: nameAttr, type: typeAttr, value: val, line: lineParam });
       });
       return mapa;
     }
@@ -164,7 +197,7 @@ $(function () {
             if (node.nodeType !== 1) return; // Omitir texto
 
             const children = Array.from(node.children).filter(c => c.nodeType === 1);
-            if (children.length === 0) return; // Vacio 
+            if (children.length === 0) return; // Vacio
 
             // Determinar si estoy parado en un nodo Fila (sus hijos son hojas = los campos)
             const isRow = children.every(c => Array.from(c.children).filter(cc => cc.nodeType === 1).length === 0);
@@ -175,12 +208,18 @@ $(function () {
 
               if (!tblMap.has(tblName)) tblMap.set(tblName, []);
               const row = {};
+              const lineMap = {}; // fieldName -> lineNumber
               children.forEach(field => {
                 let fname = field.localName || field.nodeName;
                 if (fname.includes(':')) fname = fname.split(':')[1];
                 row[fname] = field.textContent || '';
+                const ln = parseInt(field.getAttribute('data-line') || '0', 10);
+                if (ln) lineMap[fname] = ln;
               });
-              if (Object.keys(row).length > 0) tblMap.get(tblName).push(row);
+              if (Object.keys(row).length > 0) {
+                row.__lines__ = lineMap; // attach line metadata
+                tblMap.get(tblName).push(row);
+              }
             } else {
               // Navegar la rama hasta encontrar filas.
               children.forEach(findTables);
@@ -263,6 +302,7 @@ $(function () {
             categoria: 'parametros', name: k,
             valA: a.value, valB: b.value,
             typeA: a.type, typeB: b.type,
+            lineA: a.line || null, lineB: b.line || null,
             status: eq ? STATUS.IGUAL : STATUS.DIFERENTE
           });
         } else if (a) {
@@ -270,6 +310,7 @@ $(function () {
             categoria: 'parametros', name: k,
             valA: a.value, valB: null,
             typeA: a.type, typeB: null,
+            lineA: a.line || null, lineB: null,
             status: STATUS.SOBRANTE
           });
         } else {
@@ -277,13 +318,13 @@ $(function () {
             categoria: 'parametros', name: k,
             valA: null, valB: b.value,
             typeA: null, typeB: b.type,
+            lineA: null, lineB: b.line || null,
             status: STATUS.FALTANTE
           });
         }
       });
 
-      const order = { [STATUS.DIFERENTE]: 1, [STATUS.SOBRANTE]: 2, [STATUS.FALTANTE]: 3, [STATUS.IGUAL]: 4 };
-      return resultados.sort((x, y) => order[x.status] - order[y.status]);
+      return resultados;
     }
 
     function _aplanarTablas(datasetsMap) {
@@ -329,10 +370,12 @@ $(function () {
           // Solo A -> Todo SOBRANTE
           rowsA.forEach((rowA, i) => {
             const rKey = rowsA.length === 1 ? tblName : `A[${i}]`;
-            Object.keys(rowA).forEach(f => {
+            const linesA = rowA.__lines__ || {};
+            Object.keys(rowA).filter(f => f !== '__lines__').forEach(f => {
               resultados.push({
                 categoria: 'datasets', tblName, dsNameA: tbA?.dsName, dsNameB: null,
-                recordKey: rKey, fieldName: f, valA: rowA[f], valB: null, status: STATUS.SOBRANTE
+                recordKey: rKey, fieldName: f, valA: rowA[f], valB: null, status: STATUS.SOBRANTE,
+                lineA: linesA[f] || null, lineB: null
               });
             });
           });
@@ -340,10 +383,12 @@ $(function () {
           // Solo B -> Todo FALTANTE
           rowsB.forEach((rowB, j) => {
             const rKey = rowsB.length === 1 ? tblName : `B[${j}]`;
-            Object.keys(rowB).forEach(f => {
+            const linesB = rowB.__lines__ || {};
+            Object.keys(rowB).filter(f => f !== '__lines__').forEach(f => {
               resultados.push({
                 categoria: 'datasets', tblName, dsNameA: null, dsNameB: tbB?.dsName,
-                recordKey: rKey, fieldName: f, valA: null, valB: rowB[f], status: STATUS.FALTANTE
+                recordKey: rKey, fieldName: f, valA: null, valB: rowB[f], status: STATUS.FALTANTE,
+                lineA: null, lineB: linesB[f] || null
               });
             });
           });
@@ -353,7 +398,9 @@ $(function () {
 
           // Helper: compara un rowA contra un rowB y empuja resultados
           const compararPar = (rowA, rowB, rKey) => {
-            const fields = new Set([...Object.keys(rowA), ...Object.keys(rowB)]);
+            const linesA = rowA.__lines__ || {};
+            const linesB = rowB.__lines__ || {};
+            const fields = new Set([...Object.keys(rowA), ...Object.keys(rowB)].filter(k => k !== '__lines__'));
             fields.forEach(f => {
               const va = rowA[f];
               const vb = rowB[f];
@@ -367,7 +414,8 @@ $(function () {
               }
               resultados.push({
                 categoria: 'datasets', tblName, dsNameA: tbA?.dsName, dsNameB: tbB?.dsName,
-                recordKey: rKey, fieldName: f, valA: va, valB: vb, status: st
+                recordKey: rKey, fieldName: f, valA: va, valB: vb, status: st,
+                lineA: linesA[f] || null, lineB: linesB[f] || null
               });
             });
           };
@@ -464,6 +512,16 @@ $(function () {
         [STATUS.FALTANTE]: '<span class="px-2 py-0.5 rounded text-[9px] font-bold bg-orange-100 text-orange-700">FALTANTE</span>'
       };
       return b[estado] || estado;
+    }
+
+    function _lnBadge(lineA, lineB) {
+      if (!lineA && !lineB) return '<span class="text-[9px] text-gray-300 italic">—</span>';
+      const pA = lineA ? `<span class="text-sky-600 font-semibold">${lineA}</span>` : '<span class="text-gray-300">·</span>';
+      const pB = lineB ? `<span class="text-violet-600 font-semibold">${lineB}</span>` : '<span class="text-gray-300">·</span>';
+      return `<span class="inline-flex flex-col items-center leading-tight text-[8px] text-gray-400 font-mono">
+        <span title="Línea en Fuente A">A:${pA}</span>
+        <span title="Línea en Fuente B">B:${pB}</span>
+      </span>`;
     }
 
     // Handlers Generales
@@ -608,11 +666,13 @@ $(function () {
         item.resultados.parametros.forEach(r => {
           cp.todos++;
           if(cp[r.status] !== undefined) cp[r.status]++;
+          const lnBadgeP = _lnBadge(r.lineA, r.lineB);
           tbodyP.append(`
             <tr class="border-b border-outline-variant/10 hover:bg-surface-container-low transition-colors data-${r.status}" data-estado="${r.status}">
               <td class="px-6 py-2 pl-10 font-mono text-xs truncate" title="${_escapar(r.name)}">${_escapar(r.name)} <span class="text-[9px] text-gray-500">${r.typeA || r.typeB}</span></td>
               <td class="px-6 py-2 break-all overflow-hidden">${_formatoValor(r.valA)}</td>
               <td class="px-6 py-2 break-all overflow-hidden">${_formatoValor(r.valB)}</td>
+              <td class="px-3 py-2 text-center">${lnBadgeP}</td>
               <td class="px-6 py-2">${_badge(r.status)}</td>
             </tr>
           `);
@@ -625,7 +685,7 @@ $(function () {
         selP.find('option[value="sobrante"]').text(`Sobrante (${cp.sobrante})`);
         selP.find('option[value="faltante"]').text(`Faltante (${cp.faltante})`);
 
-        if (!item.resultados.parametros.length) tbodyP.append('<tr><td colspan="4" class="text-center p-4 text-xs italic text-gray-400">Sin parámetros procesados.</td></tr>');
+        if (!item.resultados.parametros.length) tbodyP.append('<tr><td colspan="5" class="text-center p-4 text-xs italic text-gray-400">Sin parámetros procesados.</td></tr>');
       } else {
         $b.find('.comparacion-seccion-parametros').hide();
       }
@@ -651,7 +711,7 @@ $(function () {
         selD.find('option[value="faltante"]').text(`Faltante (${cd.faltante})`);
 
         if (tbm.size === 0) {
-          tbodyD.append('<tr><td colspan="4" class="text-center p-4 text-xs italic text-gray-400">Sin DataSets encontrados.</td></tr>');
+          tbodyD.append('<tr><td colspan="5" class="text-center p-4 text-xs italic text-gray-400">Sin DataSets encontrados.</td></tr>');
         } else {
           tbm.forEach((filas, tname) => {
             let dsNameA = null, dsNameB = null;
@@ -689,7 +749,7 @@ $(function () {
 
             tbodyD.append(`
               <tr class="bg-surface-container-low border-b border-outline-variant/30 cursor-pointer hover:bg-surface-container transition-colors btnToggleTabla" data-target="${tableIdClass}">
-                <td colspan="4" class="px-6 pt-5 pb-3 text-on-surface">
+                <td colspan="5" class="px-6 pt-5 pb-3 text-on-surface">
                   <div class="flex flex-col gap-4">
                     <div class="flex items-center gap-2 text-[11px] font-semibold text-primary/80">
                       <span class="material-symbols-outlined text-[15px]">compare_arrows</span> 
@@ -736,7 +796,7 @@ $(function () {
 
                 tbodyD.append(`
                   <tr class="border-t-2 border-slate-200 bg-slate-50 ${tableIdClass} cursor-pointer hover:bg-slate-100 transition-colors btnToggleRecord" data-record-header="true" data-target="${blockId}" style="display:none;">
-                    <td colspan="4" class="px-6 py-1 pl-8">
+                    <td colspan="5" class="px-6 py-1 pl-8">
                       <div class="flex items-center gap-2">
                         <span class="material-symbols-outlined text-[15px] text-slate-500 toggle-icon">expand_more</span>
                         <span class="text-[10px] font-bold font-mono text-slate-700 truncate" title="${_escapar(rkeyLabel)}">${_escapar(rkeyLabel)}</span>
@@ -751,11 +811,13 @@ $(function () {
                 // Filtro de campos técnicos de Epicor
                 if (['SysRowID', 'RowMod', 'SysRevID'].includes(c.fieldName)) return;
 
+                const lnBadgeD = _lnBadge(c.lineA, c.lineB);
                 tbodyD.append(`
                   <tr class="border-b border-outline-variant/10 hover:bg-surface-container-low transition-colors data-${c.status} ${tableIdClass} ${numRegistros > 1 ? blockId : ''}" data-estado="${c.status}" style="display:none;">
                     <td class="px-6 py-1.5 pl-12 text-[11px] font-mono font-medium truncate" title="${_escapar(c.fieldName)}">${_escapar(c.fieldName)}</td>
                     <td class="px-6 py-1.5 break-all overflow-hidden">${_formatoValor(c.valA)}</td>
                     <td class="px-6 py-1.5 break-all overflow-hidden">${_formatoValor(c.valB)}</td>
+                    <td class="px-3 py-1.5 text-center">${lnBadgeD}</td>
                     <td class="px-6 py-1.5">${_badge(c.status)}</td>
                   </tr>
                 `);
