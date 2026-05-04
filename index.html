@@ -159,41 +159,58 @@
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <!-- ── Carga de Trazas ── -->
         <section class="lg:col-span-4 bg-surface-container-lowest rounded-lg shadow-sm p-5 border-l-4 border-primary">
-          <div class="flex items-center gap-2 mb-4 text-primary">
+          <div class="flex items-center gap-2 mb-3 text-primary">
             <span class="material-symbols-outlined">upload_file</span>
-            <h2 class="text-sm font-bold uppercase tracking-wider">
-              Carga de Trazas
-            </h2>
+            <h2 class="text-sm font-bold uppercase tracking-wider">Carga de Trazas</h2>
           </div>
-          <div class="space-y-3">
-            <!-- Zona de drop -->
-            <div id="dropZone"
-              class="border-2 border-dashed border-outline-variant/40 rounded-lg p-6 flex flex-col items-center justify-center bg-surface-container-low/30 hover:bg-surface-container-low transition-colors cursor-pointer">
-              <span class="material-symbols-outlined text-3xl text-outline mb-1">cloud_upload</span>
-              <p class="text-xs font-medium text-on-surface-variant">
-                Trace XML file
+          <div class="grid grid-cols-2 gap-3">
+
+            <!-- ── XML-1 ── -->
+            <div class="space-y-2">
+              <p class="text-[10px] font-black text-primary uppercase tracking-wider flex items-center gap-1">
+                <span class="inline-block w-4 h-4 rounded-full bg-primary text-white text-[9px] font-bold flex items-center justify-center">1</span>
+                XML-1
               </p>
-              <!-- Input oculto; el dropZone hace clic sobre él -->
-              <input id="fileInput" type="file" accept=".xml,.trace,.txt,.packet" class="hidden" />
-            </div>
-
-            <!-- Archivo seleccionado -->
-            <div id="fileInfoBar"
-              class="flex items-center justify-between p-2 bg-surface-container rounded border border-outline-variant/20">
-              <div class="flex items-center gap-2 overflow-hidden">
-                <span class="material-symbols-outlined text-xs text-secondary">draft</span>
-                <span id="fileName" class="text-xs font-medium truncate text-on-surface-variant">Sin archivo</span>
+              <div id="dropZone1"
+                class="border-2 border-dashed border-primary/30 rounded-lg p-3 flex flex-col items-center justify-center bg-blue-50/30 hover:bg-blue-50/60 transition-colors cursor-pointer min-h-[72px]">
+                <span class="material-symbols-outlined text-2xl text-primary/50 mb-0.5">cloud_upload</span>
+                <p class="text-[10px] text-primary/60 font-medium text-center">Archivo XML</p>
+                <input id="fileInput1" type="file" accept=".xml,.trace,.txt,.packet" class="hidden" />
               </div>
-              <button id="btnRemoveFile" class="text-error hover:bg-red-50 p-1 rounded" title="Quitar archivo">
-                <span class="material-symbols-outlined text-xs">close</span>
-              </button>
+              <div class="flex items-center justify-between px-1.5 py-1 bg-surface-container rounded border border-outline-variant/20">
+                <span id="fileName1" class="text-[10px] font-medium truncate text-on-surface-variant max-w-[90px]">Sin archivo</span>
+                <button id="btnRemoveFile1" class="text-error hover:bg-red-50 p-0.5 rounded" title="Quitar XML-1">
+                  <span class="material-symbols-outlined text-xs">close</span>
+                </button>
+              </div>
             </div>
 
-            <button id="btnCargarXml"
-              class="w-full bg-primary hover:bg-[#1e3a8a] text-white text-xs font-bold py-2 rounded transition-all active:scale-[0.98]">
-              CARGAR DATA
-            </button>
+            <!-- ── XML-2 ── -->
+            <div class="space-y-2">
+              <p class="text-[10px] font-black text-secondary uppercase tracking-wider flex items-center gap-1">
+                <span class="inline-block w-4 h-4 rounded-full bg-secondary text-white text-[9px] font-bold flex items-center justify-center">2</span>
+                XML-2
+              </p>
+              <div id="dropZone2"
+                class="border-2 border-dashed border-secondary/30 rounded-lg p-3 flex flex-col items-center justify-center bg-cyan-50/30 hover:bg-cyan-50/60 transition-colors cursor-pointer min-h-[72px]">
+                <span class="material-symbols-outlined text-2xl text-secondary/50 mb-0.5">cloud_upload</span>
+                <p class="text-[10px] text-secondary/60 font-medium text-center">Archivo XML</p>
+                <input id="fileInput2" type="file" accept=".xml,.trace,.txt,.packet" class="hidden" />
+              </div>
+              <div class="flex items-center justify-between px-1.5 py-1 bg-surface-container rounded border border-outline-variant/20">
+                <span id="fileName2" class="text-[10px] font-medium truncate text-on-surface-variant max-w-[90px]">Sin archivo</span>
+                <button id="btnRemoveFile2" class="text-error hover:bg-red-50 p-0.5 rounded" title="Quitar XML-2">
+                  <span class="material-symbols-outlined text-xs">close</span>
+                </button>
+              </div>
+            </div>
+
           </div>
+          <!-- Botón de carga global -->
+          <button id="btnCargarXml"
+            class="mt-3 w-full bg-primary hover:bg-[#1e3a8a] text-white text-xs font-bold py-2 rounded transition-all active:scale-[0.98]">
+            CARGAR DATA
+          </button>
         </section>
 
         <!-- ── Configuración de Comparación ── -->
@@ -208,7 +225,32 @@
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
-            <!-- REQ 1: Business Object A → #selectBusinessObjectA -->
+
+            <!-- ORIGEN FUENTE A -->
+            <div class="space-y-1">
+              <label for="selectOrigenA" class="text-[10px] font-black text-outline uppercase flex items-center gap-1">
+                <span class="w-3 h-3 rounded-full bg-primary inline-block"></span>
+                Origen Fuente A
+              </label>
+              <select id="selectOrigenA"
+                class="w-full bg-[#f8fafc] text-[#334155] border border-[#cbd5e1] rounded-lg py-2.5 px-3 text-xs font-semibold shadow-sm focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all appearance-none cursor-pointer">
+                <option value="">— Cargue un archivo —</option>
+              </select>
+            </div>
+
+            <!-- ORIGEN FUENTE B -->
+            <div class="space-y-1">
+              <label for="selectOrigenB" class="text-[10px] font-black text-outline uppercase flex items-center gap-1">
+                <span class="w-3 h-3 rounded-full bg-secondary inline-block"></span>
+                Origen Fuente B
+              </label>
+              <select id="selectOrigenB"
+                class="w-full bg-[#f8fafc] text-[#334155] border border-[#cbd5e1] rounded-lg py-2.5 px-3 text-xs font-semibold shadow-sm focus:ring-2 focus:ring-secondary/20 focus:border-secondary transition-all appearance-none cursor-pointer">
+                <option value="">— Cargue un archivo —</option>
+              </select>
+            </div>
+
+            <!-- Business Object A -->
             <div class="space-y-1">
               <label for="selectBusinessObjectA" class="text-[10px] font-black text-outline uppercase">
                 Fuente A (BusinessObject)
@@ -219,18 +261,18 @@
               </select>
             </div>
 
-            <!-- REQ 1: Business Object B → #selectBusinessObjectB -->
+            <!-- Business Object B -->
             <div class="space-y-1">
               <label for="selectBusinessObjectB" class="text-[10px] font-black text-outline uppercase">
                 Fuente B (BusinessObject)
               </label>
               <select id="selectBusinessObjectB"
-                class="w-full bg-[#f8fafc] text-[#334155] border border-[#cbd5e1] rounded-lg py-2.5 px-3 text-xs font-semibold shadow-sm focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all appearance-none cursor-pointer">
+                class="w-full bg-[#f8fafc] text-[#334155] border border-[#cbd5e1] rounded-lg py-2.5 px-3 text-xs font-semibold shadow-sm focus:ring-2 focus:ring-secondary/20 focus:border-secondary transition-all appearance-none cursor-pointer">
                 <option value="">— Cargue un archivo —</option>
               </select>
             </div>
 
-            <!-- REQ 2: Método A → #selectMetodoA  (numeración global) -->
+            <!-- Método A -->
             <div class="space-y-1">
               <label for="selectMetodoA" class="text-[10px] font-black text-outline uppercase">
                 Método A (Timeline)
@@ -241,16 +283,17 @@
               </select>
             </div>
 
-            <!-- REQ 2: Método B → #selectMetodoB -->
+            <!-- Método B -->
             <div class="space-y-1">
               <label for="selectMetodoB" class="text-[10px] font-black text-outline uppercase">
                 Método B (Timeline)
               </label>
               <select id="selectMetodoB"
-                class="w-full bg-[#f8fafc] text-[#334155] border border-[#cbd5e1] rounded-lg py-2.5 px-3 text-xs font-semibold shadow-sm focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all appearance-none cursor-pointer">
+                class="w-full bg-[#f8fafc] text-[#334155] border border-[#cbd5e1] rounded-lg py-2.5 px-3 text-xs font-semibold shadow-sm focus:ring-2 focus:ring-secondary/20 focus:border-secondary transition-all appearance-none cursor-pointer">
                 <option value="">— Seleccione Fuente B —</option>
               </select>
             </div>
+
           </div>
 
           <!-- REQ 3 + REQ 4: Tipo de análisis y Alcance -->

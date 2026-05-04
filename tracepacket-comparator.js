@@ -485,8 +485,11 @@ $(function () {
   // ControladorUI
   // ==========================================
   const ControladorUI = (function () {
-    let _ejecuciones = [];
-    let _archivoPendiente = null;
+
+    // ── Estado: dos archivos independientes ──
+    let _ejecucionesPorArchivo = { xml1: [], xml2: [] };
+    let _archivosPendientes    = { xml1: null, xml2: null };
+    let _nombresPorArchivo     = { xml1: 'Sin archivo', xml2: 'Sin archivo' };
 
     function _mostrarToast(msg, error = false) {
       const color = error ? 'bg-red-600' : 'bg-green-600';
@@ -524,81 +527,171 @@ $(function () {
       </span>`;
     }
 
-    // Handlers Generales
-    $('#dropZone, #fileInput').on('change drop', function (e) {
-      e.preventDefault();
-      const file = e.type === 'drop' ? e.originalEvent.dataTransfer.files[0] : (e.target.files ? e.target.files[0] : null);
-      if (!file) return;
+    // ── Helper: devuelve las ejecuciones del archivo correcto ──
+    function _getEjecs(origen) {
+      return _ejecucionesPorArchivo[origen] || [];
+    }
 
-      $('#fileName').text(file.name);
-
-      const reader = new FileReader();
-      reader.onload = e => {
-        _archivoPendiente = e.target.result;
-        _mostrarToast(`Archivo "${file.name}" listo. Presione CARGAR DATA.`);
-      };
-      reader.readAsText(file, 'UTF-8');
-    }).on('dragover', e => e.preventDefault());
-
-    $('#btnCargarXml').on('click', function () {
-      if (!_archivoPendiente) {
-        return _mostrarToast('Primero seleccione un archivo XML.', true);
-      }
-      try {
-        _ejecuciones = XmlParser.parsearXML(_archivoPendiente);
-        _llenarCombos();
-        _mostrarToast(`¡Éxito! Se procesaron ${_ejecuciones.length} métodos.`);
-      } catch (err) {
-        _mostrarToast(err.message, true);
-      }
-    });
-
-    $('#dropZone').on('click', function (e) {
-      if (e.target.id === 'fileInput') return;
-      $('#fileInput')[0].click();
-    });
-
-    $('#btnRemoveFile').on('click', () => {
-      _ejecuciones = [];
-      $('#fileName').text('Sin archivo');
-      $('#fileInput').val('');
-      _archivoPendiente = null;
-      GestorEstado.vaciar();
-      $('#comparisonsContainer').empty();
-      $('#emptyState').show();
-      _llenarCombos();
-    });
-
-    function _llenarCombos() {
-      const bos = XmlParser.obtenerBOs(_ejecuciones);
-      ['#selectBusinessObjectA', '#selectBusinessObjectB'].forEach(s => {
-        $(s).empty().append('<option value="">— Seleccione BO —</option>');
-        bos.forEach(b => $(s).append(`<option value="${b}">${b}</option>`));
-        if (bos.length === 1) $(s).val(bos[0]).trigger('change');
+    // ── Reconstruye las opciones de ambos selects de origen basado en qué archivos están cargados ──
+    function _actualizarOpcionesOrigen() {
+      ['#selectOrigenA', '#selectOrigenB'].forEach(sel => {
+        const prev = $(sel).val();
+        $(sel).empty();
+        if (_ejecucionesPorArchivo.xml1.length > 0) {
+          const n = _nombresPorArchivo.xml1;
+          const label = n.length > 22 ? n.substring(0, 19) + '…' : n;
+          $(sel).append(`<option value="xml1">XML-1: ${label}</option>`);
+        }
+        if (_ejecucionesPorArchivo.xml2.length > 0) {
+          const n = _nombresPorArchivo.xml2;
+          const label = n.length > 22 ? n.substring(0, 19) + '…' : n;
+          $(sel).append(`<option value="xml2">XML-2: ${label}</option>`);
+        }
+        if (!$(sel).find('option').length) {
+          $(sel).append('<option value="">— Cargue un archivo —</option>');
+        } else if (prev && $(sel).find(`option[value="${prev}"]`).length) {
+          $(sel).val(prev);
+        }
       });
     }
 
+    // ── Handler genérico de carga de archivo para un slot (xml1 o xml2) ──
+    function _setupFileSlot(dropZoneId, fileInputId, fileNameId, slotKey) {
+      const $dz = $(`#${dropZoneId}`);
+      const $fi = $(`#${fileInputId}`);
+
+      // Click en la zona abre el file picker
+      $dz.on('click', function (e) {
+        if (e.target.id === fileInputId) return;
+        $fi[0].click();
+      });
+
+      // Drag & drop
+      $dz.on('dragover', e => e.preventDefault());
+      $dz.on('drop', function (e) {
+        e.preventDefault();
+        const file = e.originalEvent.dataTransfer.files[0];
+        if (file) _leerArchivo(file, slotKey, fileNameId);
+      });
+
+      // Selección via input
+      $fi.on('change', function () {
+        const file = this.files ? this.files[0] : null;
+        if (file) _leerArchivo(file, slotKey, fileNameId);
+      });
+    }
+
+    function _leerArchivo(file, slotKey, fileNameId) {
+      $(`#${fileNameId}`).text(file.name);
+      _nombresPorArchivo[slotKey] = file.name;
+      const reader = new FileReader();
+      reader.onload = e => {
+        _archivosPendientes[slotKey] = e.target.result;
+        _mostrarToast(`${slotKey.toUpperCase()}: "${file.name}" listo. Presione CARGAR DATA.`);
+      };
+      reader.readAsText(file, 'UTF-8');
+    }
+
+    // Inicializar los dos slots
+    _setupFileSlot('dropZone1', 'fileInput1', 'fileName1', 'xml1');
+    _setupFileSlot('dropZone2', 'fileInput2', 'fileName2', 'xml2');
+
+    // ── Botón Cargar Data ──
+    $('#btnCargarXml').on('click', function () {
+      let procesados = 0;
+      ['xml1', 'xml2'].forEach(key => {
+        if (!_archivosPendientes[key]) return;
+        try {
+          _ejecucionesPorArchivo[key] = XmlParser.parsearXML(_archivosPendientes[key]);
+          procesados += _ejecucionesPorArchivo[key].length;
+        } catch (err) {
+          _mostrarToast(`Error en ${key.toUpperCase()}: ${err.message}`, true);
+        }
+      });
+      if (procesados === 0 && !_archivosPendientes.xml1 && !_archivosPendientes.xml2) {
+        return _mostrarToast('Seleccione al menos un archivo XML.', true);
+      }
+      _actualizarOpcionesOrigen();
+      _llenarCombosOrigen('A');
+      _llenarCombosOrigen('B');
+      _mostrarToast(`¡Éxito! Se procesaron ${procesados} métodos en total.`);
+    });
+
+    // ── Botones de quitar archivo ──
+    $('#btnRemoveFile1').on('click', () => {
+      _archivosPendientes.xml1 = null;
+      _ejecucionesPorArchivo.xml1 = [];
+      _nombresPorArchivo.xml1 = 'Sin archivo';
+      $('#fileName1').text('Sin archivo');
+      _actualizarOpcionesOrigen();
+      _llenarCombosOrigen('A');
+      _llenarCombosOrigen('B');
+    });
+
+    $('#btnRemoveFile2').on('click', () => {
+      _archivosPendientes.xml2 = null;
+      _ejecucionesPorArchivo.xml2 = [];
+      _nombresPorArchivo.xml2 = 'Sin archivo';
+      $('#fileName2').text('Sin archivo');
+      _actualizarOpcionesOrigen();
+      _llenarCombosOrigen('A');
+      _llenarCombosOrigen('B');
+    });
+
+    // ── Llenar combos según el origen seleccionado ──
+    function _llenarCombosOrigen(lado) {
+      const origenSel = lado === 'A' ? '#selectOrigenA' : '#selectOrigenB';
+      const boSel     = lado === 'A' ? '#selectBusinessObjectA' : '#selectBusinessObjectB';
+      const metSel    = lado === 'A' ? '#selectMetodoA' : '#selectMetodoB';
+
+      const origen  = $(origenSel).val() || 'xml1';
+      const ejecs   = _getEjecs(origen);
+      const bos     = XmlParser.obtenerBOs(ejecs);
+
+      $(boSel).empty().append('<option value="">— Seleccione BO —</option>');
+      bos.forEach(b => $(boSel).append(`<option value="${b}">${b}</option>`));
+      if (bos.length === 1) $(boSel).val(bos[0]).trigger('change');
+
+      $(metSel).empty().append('<option value="">— Seleccione Método —</option>');
+    }
+
+    // ── Cambio de origen dispara recarga de BOs ──
+    $('#selectOrigenA').on('change', () => _llenarCombosOrigen('A'));
+    $('#selectOrigenB').on('change', () => _llenarCombosOrigen('B'));
+
+    // ── Cambio de BO actualiza lista de Métodos ──
     $('#selectBusinessObjectA, #selectBusinessObjectB').on('change', function () {
-      const sId = this.id.endsWith('A') ? '#selectMetodoA' : '#selectMetodoB';
+      const esA   = this.id.endsWith('A');
+      const lado  = esA ? 'A' : 'B';
+      const origen = $(`#selectOrigen${lado}`).val() || 'xml1';
+      const ejecs  = _getEjecs(origen);
+      const metSel = esA ? '#selectMetodoA' : '#selectMetodoB';
       const boLabel = $(this).val();
-      $(sId).empty().append('<option value="">— Seleccione Método —</option>');
-      _ejecuciones.filter(e => e.boLabel === boLabel || !boLabel).forEach(e => {
-        $(sId).append(`<option value="${e.globalIndex}">[${e.globalIndex}] ${e.label}</option>`);
+
+      $(metSel).empty().append('<option value="">— Seleccione Método —</option>');
+      ejecs.filter(e => e.boLabel === boLabel || !boLabel).forEach(e => {
+        $(metSel).append(`<option value="${e.globalIndex}">[${e.globalIndex}] ${e.label}</option>`);
       });
     });
 
     $('#tipoComparacion').on('change', function () {
       const needsB = $(this).val() === 'output-vs-input';
+      // Origen B siempre queda habilitado para que el usuario elija el archivo fuente
       $('#selectBusinessObjectB, #selectMetodoB').prop('disabled', !needsB)
         .parent().toggleClass('opacity-40', !needsB);
-    });
+    }).trigger('change'); // Inicializar estado correcto al cargar la página
 
     $('#btnComparar').on('click', function () {
-      if (!_ejecuciones.length) return _mostrarToast('Carga un archivo XML primero.', true);
+      const origenA = $('#selectOrigenA').val() || 'xml1';
+      const origenB = $('#selectOrigenB').val() || 'xml1';
+      const ejecsA  = _getEjecs(origenA);
+      const ejecsB  = _getEjecs(origenB);
 
-      const idA = $('#selectMetodoA').val();
-      const idB = $('#selectMetodoB').val();
-      const tipo = $('#tipoComparacion').val();
+      if (!ejecsA.length && !ejecsB.length) return _mostrarToast('Carga al menos un archivo XML primero.', true);
+
+      const idA   = $('#selectMetodoA').val();
+      const idB   = $('#selectMetodoB').val();
+      const tipo  = $('#tipoComparacion').val();
       const scope = $('#tipoDatoComparado').val();
 
       if (tipo !== 'input-vs-output' && tipo !== 'output-vs-input') {
@@ -608,8 +701,8 @@ $(function () {
       if (!idA) return _mostrarToast('Selecciona el Método A', true);
       if (tipo === 'output-vs-input' && !idB) return _mostrarToast('Selecciona el Método B', true);
 
-      const ea = _ejecuciones.find(e => e.globalIndex == idA);
-      const eb = tipo === 'output-vs-input' ? _ejecuciones.find(e => e.globalIndex == idB) : ea;
+      const ea = ejecsA.find(e => e.globalIndex == idA);
+      const eb = tipo === 'output-vs-input' ? ejecsB.find(e => e.globalIndex == idB) : ea;
 
       if (!ea) return _mostrarToast('Error: No se encontró la ejecución seleccionada (A).', true);
       if (tipo === 'output-vs-input' && !eb) return _mostrarToast('Error: No se encontró la ejecución seleccionada (B).', true);
@@ -617,10 +710,11 @@ $(function () {
       let dataA, dataB, contexto;
       if (tipo === 'input-vs-output') {
         dataA = ea.input; dataB = ea.output;
-        contexto = ea.label; // Ejemplo: ChangeJob [1]
+        contexto = ea.label;
       } else {
         dataA = ea.output; dataB = eb.input;
-        contexto = `${ea.label} vs ${eb.label}`; // Ejemplo: Job [1] vs Order [1]
+        const srcTag = origenA !== origenB ? ` [${origenA.toUpperCase()}→${origenB.toUpperCase()}]` : '';
+        contexto = `${ea.label} vs ${eb.label}${srcTag}`;
       }
 
       const resul = MotorComparacion.comparar(dataA, dataB, scope);
