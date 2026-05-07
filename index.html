@@ -168,7 +168,8 @@
             <!-- ── XML-1 ── -->
             <div class="space-y-2">
               <p class="text-[10px] font-black text-primary uppercase tracking-wider flex items-center gap-1">
-                <span class="inline-block w-4 h-4 rounded-full bg-primary text-white text-[9px] font-bold flex items-center justify-center">1</span>
+                <span
+                  class="inline-block w-4 h-4 rounded-full bg-primary text-white text-[9px] font-bold flex items-center justify-center">1</span>
                 XML-1
               </p>
               <div id="dropZone1"
@@ -177,8 +178,10 @@
                 <p class="text-[10px] text-primary/60 font-medium text-center">Archivo XML</p>
                 <input id="fileInput1" type="file" accept=".xml,.trace,.txt,.packet" class="hidden" />
               </div>
-              <div class="flex items-center justify-between px-1.5 py-1 bg-surface-container rounded border border-outline-variant/20">
-                <span id="fileName1" class="text-[10px] font-medium truncate text-on-surface-variant max-w-[90px]">Sin archivo</span>
+              <div
+                class="flex items-center justify-between px-1.5 py-1 bg-surface-container rounded border border-outline-variant/20">
+                <span id="fileName1" class="text-[10px] font-medium truncate text-on-surface-variant max-w-[90px]">Sin
+                  archivo</span>
                 <button id="btnRemoveFile1" class="text-error hover:bg-red-50 p-0.5 rounded" title="Quitar XML-1">
                   <span class="material-symbols-outlined text-xs">close</span>
                 </button>
@@ -188,7 +191,8 @@
             <!-- ── XML-2 ── -->
             <div class="space-y-2">
               <p class="text-[10px] font-black text-secondary uppercase tracking-wider flex items-center gap-1">
-                <span class="inline-block w-4 h-4 rounded-full bg-secondary text-white text-[9px] font-bold flex items-center justify-center">2</span>
+                <span
+                  class="inline-block w-4 h-4 rounded-full bg-secondary text-white text-[9px] font-bold flex items-center justify-center">2</span>
                 XML-2
               </p>
               <div id="dropZone2"
@@ -197,8 +201,10 @@
                 <p class="text-[10px] text-secondary/60 font-medium text-center">Archivo XML</p>
                 <input id="fileInput2" type="file" accept=".xml,.trace,.txt,.packet" class="hidden" />
               </div>
-              <div class="flex items-center justify-between px-1.5 py-1 bg-surface-container rounded border border-outline-variant/20">
-                <span id="fileName2" class="text-[10px] font-medium truncate text-on-surface-variant max-w-[90px]">Sin archivo</span>
+              <div
+                class="flex items-center justify-between px-1.5 py-1 bg-surface-container rounded border border-outline-variant/20">
+                <span id="fileName2" class="text-[10px] font-medium truncate text-on-surface-variant max-w-[90px]">Sin
+                  archivo</span>
                 <button id="btnRemoveFile2" class="text-error hover:bg-red-50 p-0.5 rounded" title="Quitar XML-2">
                   <span class="material-symbols-outlined text-xs">close</span>
                 </button>
@@ -306,7 +312,9 @@
               <select id="tipoComparacion"
                 class="w-full bg-[#f8fafc] text-[#334155] border border-[#cbd5e1] rounded-lg py-2.5 px-3 text-xs font-semibold shadow-sm focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all appearance-none cursor-pointer">
                 <option value="input-vs-output">Input A vs Output A</option>
-                <option value="output-vs-input">Output A vs Input B</option>
+                <option value="output-vs-input" selected>Output A vs Input B</option>
+                <option value="input-vs-input">Input A vs Input B</option>
+                <option value="output-vs-output">Output A vs Output B</option>
               </select>
             </div>
 
@@ -319,7 +327,7 @@
                 class="w-full bg-[#f8fafc] text-[#334155] border border-[#cbd5e1] rounded-lg py-2.5 px-3 text-xs font-semibold shadow-sm focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all appearance-none cursor-pointer">
                 <option value="parametros">Parámetros</option>
                 <option value="datasets">DataSets</option>
-                <option value="ambos">Ambos</option>
+                <option value="ambos" selected>Ambos</option>
               </select>
             </div>
           </div>

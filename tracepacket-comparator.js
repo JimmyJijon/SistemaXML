@@ -675,7 +675,7 @@ $(function () {
     });
 
     $('#tipoComparacion').on('change', function () {
-      const needsB = $(this).val() === 'output-vs-input';
+      const needsB = $(this).val() !== 'input-vs-output';
       // Origen B siempre queda habilitado para que el usuario elija el archivo fuente
       $('#selectBusinessObjectB, #selectMetodoB').prop('disabled', !needsB)
         .parent().toggleClass('opacity-40', !needsB);
@@ -694,27 +694,36 @@ $(function () {
       const tipo  = $('#tipoComparacion').val();
       const scope = $('#tipoDatoComparado').val();
 
-      if (tipo !== 'input-vs-output' && tipo !== 'output-vs-input') {
+      if (!['input-vs-output', 'output-vs-input', 'input-vs-input', 'output-vs-output'].includes(tipo)) {
         return _mostrarToast('Modo de comparación no soportado. Abortando.', true);
       }
 
+      const needsB = tipo !== 'input-vs-output';
+
       if (!idA) return _mostrarToast('Selecciona el Método A', true);
-      if (tipo === 'output-vs-input' && !idB) return _mostrarToast('Selecciona el Método B', true);
+      if (needsB && !idB) return _mostrarToast('Selecciona el Método B', true);
 
       const ea = ejecsA.find(e => e.globalIndex == idA);
-      const eb = tipo === 'output-vs-input' ? ejecsB.find(e => e.globalIndex == idB) : ea;
+      const eb = needsB ? ejecsB.find(e => e.globalIndex == idB) : ea;
 
       if (!ea) return _mostrarToast('Error: No se encontró la ejecución seleccionada (A).', true);
-      if (tipo === 'output-vs-input' && !eb) return _mostrarToast('Error: No se encontró la ejecución seleccionada (B).', true);
+      if (needsB && !eb) return _mostrarToast('Error: No se encontró la ejecución seleccionada (B).', true);
 
       let dataA, dataB, contexto;
+      const srcTag = origenA !== origenB ? ` [${origenA.toUpperCase()}→${origenB.toUpperCase()}]` : '';
+
       if (tipo === 'input-vs-output') {
         dataA = ea.input; dataB = ea.output;
         contexto = ea.label;
-      } else {
+      } else if (tipo === 'output-vs-input') {
         dataA = ea.output; dataB = eb.input;
-        const srcTag = origenA !== origenB ? ` [${origenA.toUpperCase()}→${origenB.toUpperCase()}]` : '';
         contexto = `${ea.label} vs ${eb.label}${srcTag}`;
+      } else if (tipo === 'input-vs-input') {
+        dataA = ea.input; dataB = eb.input;
+        contexto = `${ea.label} (In) vs ${eb.label} (In)${srcTag}`;
+      } else if (tipo === 'output-vs-output') {
+        dataA = ea.output; dataB = eb.output;
+        contexto = `${ea.label} (Out) vs ${eb.label} (Out)${srcTag}`;
       }
 
       const resul = MotorComparacion.comparar(dataA, dataB, scope);
